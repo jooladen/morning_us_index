@@ -140,6 +140,7 @@ def test_volume_spike_emoji_displayed():
 
 
 def test_compact_format_for_no_signal_stock():
+    """v4 표 형식: 모든 종목이 표 한 줄. AMD는 신호 없음 (마크 컬럼 비어있음)."""
     quotes = [
         _q("AMD", "AMD", "stock", "반도체", last=100.5, prev=100.0),  # +0.5%, 신호 없음
         _q("NVDA", "엔비디아", "stock", "반도체",
@@ -148,11 +149,14 @@ def test_compact_format_for_no_signal_stock():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # AMD는 압축 1줄 ("• AMD: +0.50%")
-    assert "AMD: +0.50%" in msg
-    # NVDA는 풀 표시 (이모지 + 마크)
+    # AMD도 표 형식 라인에 등장 (변동률 +0.50%)
+    assert "AMD" in msg
+    assert "+0.50%" in msg
+    # NVDA는 거래량 마크 + 종목명
     assert "🔥" in msg
-    assert "엔비디아 NVDA" in msg
+    assert "엔비디아" in msg
+    # 표 형식 검증 — code block 등장
+    assert "```" in msg
 
 
 # ─────────────────────────────────────────────────────────────
@@ -182,6 +186,7 @@ def test_message_within_4000_chars_full_quotes():
 # ─────────────────────────────────────────────────────────────
 
 def test_stale_handling_in_v15():
+    """v4 표 형식: 헤더 2줄 분리 후 휴장 표시."""
     quotes = [
         _q("^IXIC", "나스닥", "index",
            last=26000.0, prev=25000.0,
@@ -189,7 +194,7 @@ def test_stale_handling_in_v15():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    assert "(미 증시 휴장 / 마지막 거래일)" in msg
+    assert "(미 증시 휴장)" in msg
     assert "직전 거래일: 2026-05-09" in msg
 
 
@@ -251,7 +256,10 @@ def test_news_map_none_byte_identical_to_phase15():
 
 
 def test_daytrade_candidate_shows_headline_indent():
-    """L1-msg-13: 단타 후보 줄 아래 들여쓰기로 헤드라인 등장 (F1)."""
+    """L1-msg-13 (v4 갱신): 단타 후보 아래 들여쓰기로 헤드라인 등장 (F1).
+
+    v4: '└ 📰' → 4-space 들여쓰기 + '📰' 형식.
+    """
     quotes = [
         _q("INTC", "인텔", "stock", "반도체",
            last=32.15, prev=28.20,
@@ -266,10 +274,12 @@ def test_daytrade_candidate_shows_headline_indent():
         ),
     }
     msg = build_v15_message(quotes, sigs, news_map=news_map)
-    assert "└ 📰" in msg
+    assert "📰" in msg
     assert "-0.55" in msg
     assert "Intel restructures amid weak demand" in msg
     assert "Bloomberg" in msg
+    # 들여쓰기 확인 — 헤드라인이 4 공백으로 시작하는 줄
+    assert "    📰" in msg
 
 
 def test_earnings_badge_inline_within_7_days():
@@ -286,7 +296,10 @@ def test_earnings_badge_inline_within_7_days():
 
 
 def test_earnings_badge_not_shown_beyond_7_days():
-    """L1-msg-15: days_to_earnings=8 → 배지 미표시 (Plan FR-04)."""
+    """L1-msg-15 (v4 갱신): days_to_earnings=8 → 배지 미표시 (Plan FR-04).
+
+    v4 헤더에 📅(캘린더) 이모지 추가됐으므로, 배지 형식 "📅Xd" 구체 검증.
+    """
     quotes = [
         _q("NVDA", "엔비디아", "stock", "반도체",
            last=142, prev=140,
@@ -295,7 +308,10 @@ def test_earnings_badge_not_shown_beyond_7_days():
     sigs = compute_signals(quotes)
     news_map = {"NVDA": _ns("NVDA", days_to_earnings=8)}
     msg = build_v15_message(quotes, sigs, news_map=news_map)
-    assert "📅" not in msg
+    # 배지 형식 (날짜 Xd 포함)이 등장하면 안 됨
+    assert "📅8d" not in msg
+    assert "📅3d" not in msg
+    assert "📅7d" not in msg
 
 
 def test_insider_section_appears_for_significant_buys():

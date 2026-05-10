@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -335,6 +336,111 @@ def _candidate_sort_key(candidate: tuple[Quote, Signal]) -> tuple[int, float]:
 
 
 # ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI v4 — 표 형식 (Slack code block + monospace 컬럼 정렬)
+# FR-21: 모바일 슬랙 한 줄 표시 (글자 큼 → 라인 잘림 회피)
+# ─────────────────────────────────────────────────────────────
+
+def _display_width(text: str) -> int:
+    """Slack monospace 폰트 표시 폭 추정 (CJK 2폭, 기타 1폭).
+
+    이모지는 east_asian_width='N'이나 실제 2폭 차지 — 별도 처리.
+    """
+    width = 0
+    for ch in text:
+        ea = unicodedata.east_asian_width(ch)
+        if ea in ("W", "F"):  # Wide / Fullwidth (CJK)
+            width += 2
+        elif ord(ch) >= 0x1F300:  # 이모지 영역 (대략)
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def _pad_right(text: str, target_width: int) -> str:
+    """target_width까지 우측 공백 padding (좌측 정렬)."""
+    current = _display_width(text)
+    if current >= target_width:
+        return text
+    return text + " " * (target_width - current)
+
+
+def _pad_left(text: str, target_width: int) -> str:
+    """target_width까지 좌측 공백 padding (우측 정렬, 숫자용)."""
+    current = _display_width(text)
+    if current >= target_width:
+        return text
+    return " " * (target_width - current) + text
+
+
+def _build_table_block(rows: list[list[str]], aligns: list[str] | None = None) -> list[str]:
+    """rows를 컬럼별 자동 폭 정렬 + ```code block```으로 감싸기.
+
+    Args:
+        rows: 각 row = 컬럼 문자열 리스트
+        aligns: ["left", "right", ...] 컬럼별 정렬. 기본 left.
+
+    Returns:
+        ["```", "row1...", "row2...", "```"] 형태 라인 리스트.
+    """
+    if not rows:
+        return []
+    n_cols = max(len(r) for r in rows)
+    aligns = aligns or ["left"] * n_cols
+
+    # 컬럼별 max width
+    col_widths = [0] * n_cols
+    for row in rows:
+        for i, cell in enumerate(row):
+            w = _display_width(str(cell))
+            if w > col_widths[i]:
+                col_widths[i] = w
+
+    out = ["```"]
+    for row in rows:
+        parts = []
+        for i, cell in enumerate(row):
+            if i >= n_cols:
+                break
+            if aligns[i] == "right":
+                parts.append(_pad_left(str(cell), col_widths[i]))
+            else:
+                parts.append(_pad_right(str(cell), col_widths[i]))
+        out.append("  ".join(parts).rstrip())
+    out.append("```")
+    return out
+
+
+def _format_quote_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]:
+    """단일 Quote를 표의 한 row로 변환.
+
+    컬럼: [label, ticker(or ""), price, "▲ +1.50%", marks_with_star_and_badge]
+    FR-21: 색상 이모지 🟢🔴 제거 (▲▼ 부호로 충분). 길이 ↓.
+    """
+    pct = _pct_change(q)
+    if pct > 0:
+        arrow = "▲"
+    elif pct < 0:
+        arrow = "▼"
+    else:
+        arrow = "■"
+    price_str = f"{q.last_close:,.2f}"
+    pct_str = f"{arrow} {pct:+.2f}%"
+    star = "★" if sig.is_all_time_high else ""
+    marks = sig.emoji_marks
+    badge = ""
+    if news is not None and news.has_earnings_badge:
+        badge = f"📅{news.days_to_earnings}d"
+    extra = " ".join(filter(None, [star, marks, badge]))
+    # VIX 라벨 inline (FR-20)
+    if q.ticker == "^VIX":
+        vix_label = _vix_context_label(q)
+        if vix_label:
+            extra = (extra + " " if extra else "") + f"({vix_label})"
+    return [q.label, q.ticker, price_str, pct_str, extra]
+
+
+# ─────────────────────────────────────────────────────────────
 # Phase 2-NoAI — Design Ref: §4.2
 # build_v15_message news_map 통합 헬퍼 (F2 어닝스 배지, F3 인사이더 섹션)
 # ─────────────────────────────────────────────────────────────
@@ -431,22 +537,21 @@ def build_v15_message(
     last_trading_date = max(q.last_date for q in quotes)
     any_stale = any(q.is_stale for q in quotes)
 
+    # FR-21 (v4): 헤더 2줄 분리 — 모바일 한 줄 잘림 방지
     if any_stale:
-        header = (
-            f"[{header_date} KST 06:00 발송] "
+        header_line1 = f"📅 {header_date} KST 06:00"
+        header_line2 = (
             f"직전 거래일: {last_trading_date.isoformat()} "
-            f"(미 증시 휴장 / 마지막 거래일)"
+            f"(미 증시 휴장)"
         )
     else:
-        header = (
-            f"[{header_date} KST 06:00 발송] "
-            f"직전 거래일: {last_trading_date.isoformat()}"
-        )
+        header_line1 = f"📅 {header_date} KST 06:00"
+        header_line2 = f"직전 거래일: {last_trading_date.isoformat()}"
 
-    # FR-15: 시장 동향 한 줄 (헤더 직후)
+    # FR-15: 시장 동향 한 줄
     mood_line = _format_market_mood_line(quotes)
 
-    lines: list[str] = [header, mood_line, ""]
+    lines: list[str] = [header_line1, header_line2, mood_line, ""]
 
     # 카테고리별 분류
     indices = [q for q in quotes if q.category == "index"]
@@ -454,19 +559,20 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
+    # FR-21: 표 형식 컬럼 정렬 표준 (모든 섹션 공통)
+    # [label, ticker, price (right-aligned), "▲ +1.50%", marks/star/badge]
+    table_aligns = ["left", "left", "right", "left", "left"]
+
     # 📈 [지수] — FR-20: VIX 종목 라인 끝에 (안정/경계/공포) 라벨 inline
     if indices:
         lines.append("📈 [지수]")
+        rows = []
         for q in indices:
             sig = signals.get(q.ticker)
             if sig is None:
                 continue
-            line = _format_v15_quote_line(q, sig)
-            if q.ticker == "^VIX":
-                vix_label = _vix_context_label(q)
-                if vix_label:
-                    line = f"{line} ({vix_label})"
-            lines.append(line)
+            rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
+        lines.extend(_build_table_block(rows, aligns=table_aligns))
         lines.append("")
 
     # 🎯 [단타 핵심: 선물 + 시간외]
@@ -476,16 +582,18 @@ def build_v15_message(
     )
     if futures or has_ahrs:
         lines.append("🎯 [단타 핵심: 선물 + 시간외]")
+        rows = []
         for q in futures:
             sig = signals.get(q.ticker)
             if sig is not None:
-                lines.append(_format_v15_quote_line(q, sig))
-        # AHRS — 시간외 변동 있는 stocks만
+                rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
+        # AHRS — 시간외 변동 있는 stocks만, 짧은 라인으로
         for q in stocks:
             sig = signals.get(q.ticker)
             if sig is not None and sig.is_afterhours_move and q.afterhours_close and q.last_close:
                 ah_pct = (q.afterhours_close - q.last_close) / q.last_close * 100.0
-                lines.append(f"• AHRS {q.ticker}: {ah_pct:+.1f}% 📊")
+                rows.append([f"AHRS {q.ticker}", "", "", f"{ah_pct:+.1f}%", "📊"])
+        lines.extend(_build_table_block(rows, aligns=table_aligns))
         lines.append("")
 
     # 섹터별 stocks (반도체, 빅테크, EV/암호)
@@ -499,28 +607,25 @@ def build_v15_message(
         if not sector_stocks:
             continue
         lines.append(header_label)
+        rows = []
         for q in sector_stocks:
             sig = signals.get(q.ticker)
             if sig is None:
                 continue
-            # 신호 있거나 사상최고면 풀 표시 (Phase 2-NoAI: + 📅 배지), 그 외는 압축
-            if sig.signal_count > 0 or sig.is_all_time_high:
-                lines.append(
-                    _format_v15_quote_line_with_earnings(
-                        q, sig, _news_map.get(q.ticker)
-                    )
-                )
-            else:
-                lines.append(_format_compact_line(q))
+            # 표 형식 일관 — 신호 없어도 한 줄 표시 (이전에는 compact format이었음)
+            rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
+        lines.extend(_build_table_block(rows, aligns=table_aligns))
         lines.append("")
 
     # 💰 [거시]
     if macros:
         lines.append("💰 [거시]")
+        rows = []
         for q in macros:
             sig = signals.get(q.ticker)
             if sig is not None:
-                lines.append(_format_v15_quote_line(q, sig))
+                rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
+        lines.extend(_build_table_block(rows, aligns=table_aligns))
         lines.append("")
 
     # 💼 [내부자 매수 급증 7일 (≥$1M)] — Phase 2-NoAI F3 (Plan FR-05, FR-10)
@@ -540,13 +645,15 @@ def build_v15_message(
     if candidates:
         lines.append("🚨 [오늘 단타 후보 (신호 2개 이상)]")
         for q, sig in candidates:
-            # FR-17: 사유 한글 구체화 (갭% / 거래량× / 시간외%)
+            # FR-21 (v4): 사유는 다음 줄로 분리해서 모바일 한 줄 안 잘리게
             reason_str = _format_candidate_reasons(q, sig)
-            lines.append(f"• {q.label} {q.ticker} — {sig.emoji_marks} ({reason_str})")
+            lines.append(f"• {q.label} {q.ticker} — {sig.emoji_marks}")
+            lines.append(f"    {reason_str}")
             # Phase 2-NoAI F1: 헤드라인 들여쓰기 (Plan FR-09)
-            headline_line = _format_daytrade_headline(_news_map.get(q.ticker))
-            if headline_line is not None:
-                lines.append(headline_line)
+            news = _news_map.get(q.ticker)
+            if news is not None and news.top_headline is not None:
+                title, source, compound = news.top_headline
+                lines.append(f"    📰 {compound:+.2f} \"{title}\" ({source})")
         lines.append("")  # 후보 섹션 뒤 빈 줄 (푸터 분리)
 
     # FR-17: 초보자 가이드 푸터 (메시지 끝 1줄)
