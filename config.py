@@ -103,6 +103,36 @@ DAYTRADE_CANDIDATE_MIN_SIGNALS: int = 2
 
 
 # ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI — Design Ref: §3.2
+# 객관적 사실 데이터 3종(F1 헤드라인+VADER, F2 어닝스 배지, F3 인사이더 매수)
+# ─────────────────────────────────────────────────────────────
+
+# F1: VADER compound |c| ≥ 0.3 만 surface (Plan FR-03)
+NEWS_VADER_COMPOUND_THRESHOLD: float = 0.3
+
+# F1: 헤드라인 80자 초과 시 77자 + "..." (OQ-3)
+NEWS_HEADLINE_MAX_CHARS: int = 80
+
+# F2: ≤ 7일 어닝스만 📅 배지 표시 (Plan FR-04)
+EARNINGS_LOOKAHEAD_DAYS: int = 7
+
+# F3: 7일 누적 인사이더 순매수 ≥ $1M 만 섹션 표시 (Plan FR-05)
+INSIDER_BUY_USD_THRESHOLD: float = 1_000_000.0
+
+# F3: 인사이더 합산 기간 (7일)
+INSIDER_LOOKBACK_DAYS: int = 7
+
+# 병렬 호출: 14 stocks × ~1s → ~3-4s (Plan FR-06)
+NEWS_THREAD_POOL_WORKERS: int = 8
+
+# per-ticker yfinance 호출 타임아웃
+NEWS_FETCH_TIMEOUT_SEC: float = 5.0
+
+# feature flag 환경변수 이름
+ENABLE_NEWS_ENV_VAR: str = "ENABLE_NEWS"
+
+
+# ─────────────────────────────────────────────────────────────
 
 def load_slack_webhook_url() -> str:
     """SLACK_WEBHOOK_URL 환경변수를 읽어 반환.
@@ -117,3 +147,11 @@ def load_slack_webhook_url() -> str:
             "GitHub Secrets 또는 로컬 환경변수에 등록하세요."
         )
     return url
+
+
+def is_news_enabled() -> bool:
+    """Phase 2-NoAI feature flag 파싱 (OQ-2: default true).
+
+    ENABLE_NEWS=false 면 Phase 1.5 동작과 byte 단위 동일 출력 (NFR-07 안전망).
+    """
+    return os.environ.get(ENABLE_NEWS_ENV_VAR, "true").strip().lower() == "true"

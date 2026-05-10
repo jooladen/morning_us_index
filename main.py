@@ -28,9 +28,11 @@ from config import (
     TICKERS,
     TIMEZONE_KST,
     YFINANCE_PERIOD,
+    is_news_enabled,
     load_slack_webhook_url,
 )
 from data import Quote, fetch_all
+from news import NewsSnapshot, fetch_news_all
 from signals import Signal, compute_signals
 
 
@@ -239,25 +241,97 @@ def _format_compact_line(q: Quote) -> str:
     return f"• {q.label}: {pct:+.2f}%"
 
 
+# ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI — Design Ref: §4.2
+# build_v15_message news_map 통합 헬퍼 (F2 어닝스 배지, F3 인사이더 섹션)
+# ─────────────────────────────────────────────────────────────
+
+def _format_v15_quote_line_with_earnings(
+    q: Quote,
+    sig: Signal,
+    news: NewsSnapshot | None,
+) -> str:
+    """기존 _format_v15_quote_line + 📅Xd 배지 inline (F2).
+
+    Plan FR-04: ``has_earnings_badge`` 충족 시만 배지 부착.
+    """
+    base = _format_v15_quote_line(q, sig)
+    if news is not None and news.has_earnings_badge:
+        return f"{base} 📅{news.days_to_earnings}d"
+    return base
+
+
+def _format_insider_section(
+    news_map: dict[str, NewsSnapshot],
+    quotes: list[Quote],
+) -> list[str]:
+    """💼 [내부자 매수 급증 7일 (≥$1M)] 섹션 라인 (F3).
+
+    Plan FR-05: ``has_significant_insider_buy`` 종목만 표시.
+    OQ-4: net buy USD 내림차순 정렬.
+
+    Returns:
+        섹션 라인 리스트 (헤더 + 종목 라인들 + 빈 줄). 발화 종목 0이면 [].
+    """
+    label_by_ticker = {q.ticker: q.label for q in quotes}
+    significant = [
+        ns for ns in news_map.values() if ns.has_significant_insider_buy
+    ]
+    if not significant:
+        return []
+    significant.sort(
+        key=lambda ns: ns.insider_net_buy_usd_7d or 0.0, reverse=True
+    )
+
+    lines = ["💼 [내부자 매수 급증 7일 (≥$1M)]"]
+    for ns in significant:
+        label = label_by_ticker.get(ns.ticker, ns.ticker)
+        usd = ns.insider_net_buy_usd_7d or 0.0
+        usd_m = usd / 1_000_000.0
+        lines.append(f"• {ns.ticker} {label}: 임원 +${usd_m:,.1f}M 매수")
+    lines.append("")
+    return lines
+
+
+def _format_daytrade_headline(news: NewsSnapshot | None) -> str | None:
+    """단타 후보 줄 아래 들여쓰기 헤드라인 라인 (F1).
+
+    Plan FR-09: ``  └ 📰 {compound:+.2f} "{title}" ({source})``.
+    헤드라인 없으면 None.
+    """
+    if news is None or news.top_headline is None:
+        return None
+    title, source, compound = news.top_headline
+    return f"  └ 📰 {compound:+.2f} \"{title}\" ({source})"
+
+
 def build_v15_message(
     quotes: list[Quote],
     signals: dict[str, Signal],
+    news_map: dict[str, NewsSnapshot] | None = None,
 ) -> str:
-    """Phase 1.5 슬랙 메시지 빌드 (Design §4.5).
+    """Phase 1.5 + Phase 2-NoAI 슬랙 메시지 빌드.
 
     섹션 구조:
         - 헤더 (날짜 + 휴장 여부)
         - 📈 [지수]
         - 🎯 [단타 핵심: 선물 + 시간외]
         - 🏭 [반도체] / 📱 [빅테크] / 🚗 [EV/암호]
+            └ news_map 있을 때 📅Xd 배지 inline (F2)
         - 💰 [거시]
+        - 💼 [내부자 매수 급증 7일 (≥$1M)]   ← Phase 2-NoAI F3 (발화 시만)
         - 🚨 [오늘 단타 후보] (신호 ≥ 2개 종목)
+            └ news_map 있을 때 헤드라인 들여쓰기 (F1)
 
     Plan SC-1.5-4: 단타 후보 자동 요약
     Plan NFR-01: ≤ 4,000자 (압축 정책 자동 적용)
+    Plan NFR-07: ``news_map=None`` 시 Phase 1.5와 byte 단위 동일 출력 (회귀 안전).
     """
     if not quotes:
         raise RuntimeError("build_v15_message: quotes 리스트가 비어있습니다.")
+
+    # news_map=None 일 때 헬퍼 접근을 위해 정규화 (Phase 1.5 경로 보존)
+    _news_map: dict[str, NewsSnapshot] = news_map or {}
 
     now_kst = datetime.now(ZoneInfo(TIMEZONE_KST))
     header_date = now_kst.strftime("%Y-%m-%d")
@@ -327,9 +401,13 @@ def build_v15_message(
             sig = signals.get(q.ticker)
             if sig is None:
                 continue
-            # 신호 있거나 사상최고면 풀 표시, 그 외는 압축
+            # 신호 있거나 사상최고면 풀 표시 (Phase 2-NoAI: + 📅 배지), 그 외는 압축
             if sig.signal_count > 0 or sig.is_all_time_high:
-                lines.append(_format_v15_quote_line(q, sig))
+                lines.append(
+                    _format_v15_quote_line_with_earnings(
+                        q, sig, _news_map.get(q.ticker)
+                    )
+                )
             else:
                 lines.append(_format_compact_line(q))
         lines.append("")
@@ -342,6 +420,10 @@ def build_v15_message(
             if sig is not None:
                 lines.append(_format_v15_quote_line(q, sig))
         lines.append("")
+
+    # 💼 [내부자 매수 급증 7일 (≥$1M)] — Phase 2-NoAI F3 (Plan FR-05, FR-10)
+    if _news_map:
+        lines.extend(_format_insider_section(_news_map, quotes))
 
     # 🚨 [오늘 단타 후보 (신호 2개 이상)]
     candidates: list[tuple[Quote, Signal]] = []
@@ -366,6 +448,10 @@ def build_v15_message(
                 reasons.append("시간외")
             reason_str = " + ".join(reasons)
             lines.append(f"• {q.label} {q.ticker} — {sig.emoji_marks} ({reason_str})")
+            # Phase 2-NoAI F1: 헤드라인 들여쓰기 (Plan FR-09)
+            headline_line = _format_daytrade_headline(_news_map.get(q.ticker))
+            if headline_line is not None:
+                lines.append(headline_line)
 
     msg = "\n".join(lines).rstrip()
     return _compress_if_needed(msg)
@@ -400,13 +486,22 @@ def main() -> int:
 
     try:
         webhook_url = load_slack_webhook_url()
-        quotes = fetch_all()                                # 🆕 data.py
-        signals_map = compute_signals(quotes)               # 🆕 signals.py
-        message = build_v15_message(quotes, signals_map)    # 🆕 v15 builder
+        quotes = fetch_all()                                # data.py
+        signals_map = compute_signals(quotes)               # signals.py
+
+        # Phase 2-NoAI: ENABLE_NEWS=true(default) 시 news_map fetch (Plan FR-11)
+        news_map = None
+        if is_news_enabled():
+            stock_quotes = [q for q in quotes if q.category == "stock"]
+            news_map = fetch_news_all(stock_quotes)
+
+        message = build_v15_message(quotes, signals_map, news_map=news_map)
         post_slack(webhook_url, message)                    # 기존 그대로
+
+        news_count = len(news_map) if news_map else 0
         print(
-            f"[OK] morning-us-index-v15 발송 완료 "
-            f"({len(quotes)} quotes, {len(message)} chars)"
+            f"[OK] morning-us-index-noai-v2 발송 완료 "
+            f"({len(quotes)} quotes, {news_count} news, {len(message)} chars)"
         )
         return 0
     except Exception as e:
@@ -420,7 +515,7 @@ def main() -> int:
                 requests.post(
                     webhook_url,
                     json={
-                        "text": f"⚠️ morning-us-index-v15 실행 실패\n```{error_text}```"
+                        "text": f"⚠️ morning-us-index-noai-v2 실행 실패\n```{error_text}```"
                     },
                     timeout=(HTTP_CONNECT_TIMEOUT_SEC, HTTP_READ_TIMEOUT_SEC),
                 )

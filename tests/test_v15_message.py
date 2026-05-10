@@ -209,3 +209,123 @@ def test_afterhours_section_appears_when_data_present():
     msg = build_v15_message(quotes, sigs)
     assert "AHRS NVDA" in msg
     assert "📊" in msg
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI — news_map 통합 (Design §8.3, +6 케이스)
+# Design Ref: Plan NFR-07, FR-04, FR-05, FR-09, FR-10
+# ─────────────────────────────────────────────────────────────
+
+from news import NewsSnapshot  # noqa: E402
+
+
+def _ns(
+    ticker: str,
+    *,
+    headline=None,
+    earnings_date=None,
+    days_to_earnings=None,
+    insider_usd=None,
+) -> NewsSnapshot:
+    return NewsSnapshot(
+        ticker=ticker,
+        top_headline=headline,
+        next_earnings_date=earnings_date,
+        days_to_earnings=days_to_earnings,
+        insider_net_buy_usd_7d=insider_usd,
+    )
+
+
+def test_news_map_none_byte_identical_to_phase15():
+    """L1-msg-12: news_map=None 시 Phase 1.5와 byte 단위 동일 (Plan NFR-07 회귀 안전)."""
+    quotes = [
+        _q("^IXIC", "나스닥", "index", last=26000, prev=25000),
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),
+    ]
+    sigs = compute_signals(quotes)
+    msg_phase15 = build_v15_message(quotes, sigs)
+    msg_with_none = build_v15_message(quotes, sigs, news_map=None)
+    assert msg_phase15 == msg_with_none
+
+
+def test_daytrade_candidate_shows_headline_indent():
+    """L1-msg-13: 단타 후보 줄 아래 들여쓰기로 헤드라인 등장 (F1)."""
+    quotes = [
+        _q("INTC", "인텔", "stock", "반도체",
+           last=32.15, prev=28.20,
+           open_today=31.59,  # 갭 +12%
+           volume_today=8_000_000, volume_avg_20d=1_000_000),
+    ]
+    sigs = compute_signals(quotes)
+    news_map = {
+        "INTC": _ns(
+            "INTC",
+            headline=("Intel restructures amid weak demand", "Bloomberg", -0.55),
+        ),
+    }
+    msg = build_v15_message(quotes, sigs, news_map=news_map)
+    assert "└ 📰" in msg
+    assert "-0.55" in msg
+    assert "Intel restructures amid weak demand" in msg
+    assert "Bloomberg" in msg
+
+
+def test_earnings_badge_inline_within_7_days():
+    """L1-msg-14: days_to_earnings=3 → 📅3d 배지 inline (F2)."""
+    quotes = [
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),  # 신호 1개 → 풀 표시
+    ]
+    sigs = compute_signals(quotes)
+    news_map = {"NVDA": _ns("NVDA", days_to_earnings=3)}
+    msg = build_v15_message(quotes, sigs, news_map=news_map)
+    assert "📅3d" in msg
+
+
+def test_earnings_badge_not_shown_beyond_7_days():
+    """L1-msg-15: days_to_earnings=8 → 배지 미표시 (Plan FR-04)."""
+    quotes = [
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),
+    ]
+    sigs = compute_signals(quotes)
+    news_map = {"NVDA": _ns("NVDA", days_to_earnings=8)}
+    msg = build_v15_message(quotes, sigs, news_map=news_map)
+    assert "📅" not in msg
+
+
+def test_insider_section_appears_for_significant_buys():
+    """L1-msg-16: 💼 섹션 — 발화 종목 있음, net buy 큰 순 정렬 (Plan FR-05, OQ-4)."""
+    quotes = [
+        _q("TSLA", "테슬라", "stock", "EV/암호", last=312, prev=300),
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+    ]
+    sigs = compute_signals(quotes)
+    news_map = {
+        "NVDA": _ns("NVDA", insider_usd=1_400_000.0),  # $1.4M
+        "TSLA": _ns("TSLA", insider_usd=3_200_000.0),  # $3.2M
+    }
+    msg = build_v15_message(quotes, sigs, news_map=news_map)
+    assert "💼 [내부자 매수 급증 7일 (≥$1M)]" in msg
+    assert "+$3.2M" in msg
+    assert "+$1.4M" in msg
+    # OQ-4: 큰 순 정렬 — TSLA가 NVDA보다 먼저
+    assert msg.index("TSLA 테슬라") < msg.index("NVDA 엔비디아")
+
+
+def test_insider_section_omitted_when_no_significant_buys():
+    """L1-msg-17: 발화 종목 0 → 💼 섹션 자체 생략."""
+    quotes = [
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+    ]
+    sigs = compute_signals(quotes)
+    news_map = {
+        "NVDA": _ns("NVDA", insider_usd=500_000.0),  # $0.5M < threshold
+    }
+    msg = build_v15_message(quotes, sigs, news_map=news_map)
+    assert "💼" not in msg
+    assert "내부자 매수" not in msg
