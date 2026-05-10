@@ -131,6 +131,10 @@ NEWS_FETCH_TIMEOUT_SEC: float = 5.0
 # feature flag 환경변수 이름
 ENABLE_NEWS_ENV_VAR: str = "ENABLE_NEWS"
 
+# FR-13: F1 헤드라인 한글 번역 (Plan FR-13, 운영 후 추가)
+ENABLE_NEWS_TRANSLATION_ENV_VAR: str = "ENABLE_NEWS_TRANSLATION"
+NEWS_TRANSLATION_TIMEOUT_SEC: float = 3.0
+
 
 # ─────────────────────────────────────────────────────────────
 
@@ -155,3 +159,14 @@ def is_news_enabled() -> bool:
     ENABLE_NEWS=false 면 Phase 1.5 동작과 byte 단위 동일 출력 (NFR-07 안전망).
     """
     return os.environ.get(ENABLE_NEWS_ENV_VAR, "true").strip().lower() == "true"
+
+
+def is_news_translation_enabled() -> bool:
+    """FR-13 한글 번역 feature flag (default true).
+
+    ENABLE_NEWS_TRANSLATION=false 시 영문 헤드라인 원문 표시. deep-translator 비공식
+    endpoint 503/rate-limit 회피용 안전망.
+    """
+    return (
+        os.environ.get(ENABLE_NEWS_TRANSLATION_ENV_VAR, "true").strip().lower() == "true"
+    )

@@ -26,12 +26,26 @@ from news import (
     NewsSnapshot,
     _build_snapshot,
     _score_headline,
+    _translate_to_korean,
     _truncate,
     fetch_earnings_for_ticker,
     fetch_insider_for_ticker,
     fetch_news_all,
     fetch_news_for_ticker,
 )
+
+
+# ─────────────────────────────────────────────────────────────
+# 공통 fixture — 모든 fetch_news_for_ticker 테스트의 번역 호출 stub
+# 외부 네트워크 의존 차단 + 결정적 테스트 보장
+# ─────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=False)
+def _translate_passthrough(monkeypatch):
+    """_translate_to_korean을 identity 함수로 대체.
+    번역 결과 의존 없는 fetch_news_for_ticker 테스트용.
+    """
+    monkeypatch.setattr("news._translate_to_korean", lambda s: s)
 
 
 # ═════════════════════════════════════════════════════════════
@@ -115,7 +129,7 @@ class _FakeTickerNews:
         self.news = news_list
 
 
-def test_fetch_news_first_item_passes_threshold():
+def test_fetch_news_first_item_passes_threshold(_translate_passthrough):
     """L1-news-9: 첫 헤드라인 |compound|≥0.3 → surface."""
     items = [
         {"title": "Stock crashes, plunges, terrible loss", "publisher": "Reuters"},
@@ -129,7 +143,7 @@ def test_fetch_news_first_item_passes_threshold():
     assert compound <= -0.3
 
 
-def test_fetch_news_skips_below_threshold_until_match():
+def test_fetch_news_skips_below_threshold_until_match(_translate_passthrough):
     """L1-news-10: 첫 항목 임계값 미달, 두 번째 통과."""
     items = [
         {"title": "Quarterly report scheduled for Tuesday", "publisher": "AP"},  # 중립
@@ -144,7 +158,7 @@ def test_fetch_news_skips_below_threshold_until_match():
     assert compound >= 0.3
 
 
-def test_fetch_news_all_items_below_threshold_returns_none():
+def test_fetch_news_all_items_below_threshold_returns_none(_translate_passthrough):
     """L1-news-11: 모든 항목 임계값 미달 → None."""
     items = [
         {"title": "Quarterly report scheduled for Tuesday", "publisher": "AP"},
@@ -155,7 +169,7 @@ def test_fetch_news_all_items_below_threshold_returns_none():
     assert result is None
 
 
-def test_fetch_news_exception_returns_none():
+def test_fetch_news_exception_returns_none(_translate_passthrough):
     """L1-news-12: yfinance 예외 → None (fail-open) + warn 로그."""
     class _RaisingTicker:
         @property
@@ -357,3 +371,83 @@ def test_news_snapshot_earnings_badge_boundary():
     ns_8 = NewsSnapshot(ticker="B", days_to_earnings=8, **base)
     assert ns_7.has_earnings_badge is True
     assert ns_8.has_earnings_badge is False
+
+
+# ═════════════════════════════════════════════════════════════
+# FR-13 — _translate_to_korean (5 케이스)
+# Plan FR-13, Design §4.4.1
+# ═════════════════════════════════════════════════════════════
+
+def test_translate_success_returns_korean(monkeypatch):
+    """L1-news-23: 번역 성공 — mock translator가 반환한 한글."""
+    class _FakeTr:
+        def translate(self, text):
+            return "인텔 개편으로 투자자 우려 촉발"
+
+    monkeypatch.setattr("news._get_translator", lambda: _FakeTr())
+    result = _translate_to_korean("Intel reorganization sparks investor concern")
+    assert result == "인텔 개편으로 투자자 우려 촉발"
+
+
+def test_translate_exception_returns_original(monkeypatch):
+    """L1-news-24: 번역 예외 (rate-limit/503) → 원문 반환 (fail-open)."""
+    class _RaisingTr:
+        def translate(self, text):
+            raise RuntimeError("rate limited")
+
+    monkeypatch.setattr("news._get_translator", lambda: _RaisingTr())
+    original = "Stock crashes, plunges, terrible loss"
+    result = _translate_to_korean(original)
+    assert result == original  # fallback
+
+
+def test_translate_empty_result_returns_original(monkeypatch):
+    """L1-news-25: 번역 결과가 빈 문자열 → 원문 fallback."""
+    class _EmptyTr:
+        def translate(self, text):
+            return ""
+
+    monkeypatch.setattr("news._get_translator", lambda: _EmptyTr())
+    result = _translate_to_korean("Original text")
+    assert result == "Original text"
+
+
+def test_translate_empty_input_returns_empty():
+    """L1-news-26: 빈 입력 → 빈 결과 (number 호출 없음)."""
+    assert _translate_to_korean("") == ""
+    assert _translate_to_korean("   ") == ""
+
+
+def test_fetch_news_uses_translation_when_enabled(monkeypatch):
+    """L1-news-27: fetch_news_for_ticker가 번역 활성 시 한글 결과 반환."""
+    items = [
+        {"title": "Stock crashes, plunges, terrible loss", "publisher": "Reuters"},
+    ]
+    monkeypatch.setattr("news.is_news_translation_enabled", lambda: True)
+    monkeypatch.setattr("news._translate_to_korean", lambda s: "주가 폭락, 끔찍한 손실")
+
+    with patch("news.yf.Ticker", return_value=_FakeTickerNews(items)):
+        result = fetch_news_for_ticker("NVDA")
+    assert result is not None
+    title, source, compound = result
+    assert title == "주가 폭락, 끔찍한 손실"  # 한글 결과
+    assert compound <= -0.3  # 영문 원문으로 score 계산 보존
+
+
+def test_fetch_news_keeps_english_when_disabled(monkeypatch):
+    """L1-news-28: ENABLE_NEWS_TRANSLATION=false 시 영문 원문 유지 (안전망)."""
+    items = [
+        {"title": "Stock crashes, plunges, terrible loss", "publisher": "Reuters"},
+    ]
+    monkeypatch.setattr("news.is_news_translation_enabled", lambda: False)
+    # _translate_to_korean이 호출되면 안 됨 — 호출 시 명백한 marker 반환
+    monkeypatch.setattr(
+        "news._translate_to_korean", lambda s: "SHOULD_NOT_BE_CALLED"
+    )
+
+    with patch("news.yf.Ticker", return_value=_FakeTickerNews(items)):
+        result = fetch_news_for_ticker("NVDA")
+    assert result is not None
+    title, _, _ = result
+    assert title == "Stock crashes, plunges, terrible loss"
+    assert "SHOULD_NOT_BE_CALLED" not in title

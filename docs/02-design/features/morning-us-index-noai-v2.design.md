@@ -255,6 +255,8 @@ class NewsSnapshot:
 | `NEWS_THREAD_POOL_WORKERS` | `8` | ThreadPoolExecutor max_workers (Plan FR-06) |
 | `NEWS_FETCH_TIMEOUT_SEC` | `5.0` | per-ticker yfinance 호출 타임아웃 |
 | `ENABLE_NEWS_ENV_VAR` | `"ENABLE_NEWS"` | feature flag 환경변수 이름 |
+| `ENABLE_NEWS_TRANSLATION_ENV_VAR` | `"ENABLE_NEWS_TRANSLATION"` | FR-13 한글 번역 feature flag (default true) |
+| `NEWS_TRANSLATION_TIMEOUT_SEC` | `3.0` | per-headline 번역 호출 타임아웃 (deep-translator 비공식 endpoint 안전망) |
 
 ```python
 # Phase 2-NoAI 신규 상수
@@ -665,7 +667,33 @@ def main() -> int:
  yfinance>=0.2.40
  requests>=2.31
 +vaderSentiment>=3.3.2
++deep-translator>=1.11.4    # FR-13: 한글 번역 (운영 후 추가)
 ```
+
+### 4.4.1 FR-13 한글 번역 통합 흐름
+
+```
+fetch_news_for_ticker(ticker)
+   │
+   ├─ yf.Ticker(ticker).news → list[dict]
+   │
+   └─ for item in items:
+        title_en = _extract_title(item)
+        compound = _score_headline(title_en)        ← VADER는 영문 원문으로 계산
+        if abs(compound) < 0.3: continue
+        title_display = (
+            _translate_to_korean(title_en)          ← 호재/악재 판정 후 번역
+            if is_news_translation_enabled()        ← env flag
+            else title_en
+        )
+        return (_truncate(title_display), source, compound)   ← truncate는 표시할 텍스트 기준
+```
+
+**핵심 결정**:
+- VADER score 계산은 **영문 원문**으로 (한글 lexicon은 VADER에 없음, 번역 오역이 score 오염 가능)
+- |compound|≥0.3 통과 후에만 번역 (실패 헤드라인을 굳이 번역 안 함, 호출 비용 ↓)
+- truncate는 **번역 후** 텍스트 기준 (한글이 영문보다 짧을 수 있음)
+- 번역 실패 시 원문 fallback (fail-open, 사용자 메시지 발송 보장)
 
 ### 4.5 메시지 mockup (FR-08, FR-09, FR-10 통합)
 

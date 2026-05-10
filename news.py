@@ -32,6 +32,7 @@ from config import (
     NEWS_THREAD_POOL_WORKERS,
     NEWS_VADER_COMPOUND_THRESHOLD,
     TIMEZONE_KST,
+    is_news_translation_enabled,
 )
 from data import Quote
 
@@ -115,6 +116,48 @@ def _truncate(title: str, max_chars: int = NEWS_HEADLINE_MAX_CHARS) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
+# FR-13: 한글 번역 (deep-translator Google, lazy singleton + fail-open)
+# Design Ref: §4.4.1
+# ─────────────────────────────────────────────────────────────
+
+_TRANSLATOR: object | None = None  # GoogleTranslator instance, lazy
+
+
+def _get_translator():
+    """deep-translator Google 인스턴스 lazy 초기화.
+
+    별도 함수로 분리: import 자체를 lazy 처리해서 ENABLE_NEWS_TRANSLATION=false
+    환경에서는 deep-translator import 비용도 0.
+    """
+    global _TRANSLATOR
+    if _TRANSLATOR is None:
+        from deep_translator import GoogleTranslator  # lazy import
+        _TRANSLATOR = GoogleTranslator(source="en", target="ko")
+    return _TRANSLATOR
+
+
+def _translate_to_korean(text: str) -> str:
+    """영문 헤드라인 → 한글 번역. 실패 시 원문 반환 (fail-open).
+
+    Plan FR-13. 외부 무료 endpoint 의존이라 503/rate-limit/타임아웃 가능 →
+    어떤 예외든 swallow + 원문 fallback. 메시지 발송 자체는 보장.
+    """
+    text = (text or "").strip()
+    if not text:
+        return text
+    try:
+        translator = _get_translator()
+        result = translator.translate(text)
+        if isinstance(result, str) and result.strip():
+            return result.strip()
+    except Exception as e:
+        sys.stderr.write(
+            f"[WARN] translation failed (fallback to original): {type(e).__name__}\n"
+        )
+    return text  # fallback
+
+
+# ─────────────────────────────────────────────────────────────
 # Per-ticker fetchers (각각 fail-open)
 # ─────────────────────────────────────────────────────────────
 
@@ -141,10 +184,14 @@ def fetch_news_for_ticker(ticker: str) -> tuple[str, str, float] | None:
         if not title:
             continue
         source = _extract_source(item)
-        compound = _score_headline(title)
+        compound = _score_headline(title)  # FR-03: VADER는 영문 원문으로 계산
         if abs(compound) < NEWS_VADER_COMPOUND_THRESHOLD:
             continue  # 다음 헤드라인 시도
-        return (_truncate(title), source, compound)
+        # FR-13: 한글 번역 (env flag false면 영문 그대로). 실패 시 원문 fallback.
+        display_title = (
+            _translate_to_korean(title) if is_news_translation_enabled() else title
+        )
+        return (_truncate(display_title), source, compound)
 
     return None
 
