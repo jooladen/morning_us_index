@@ -5,7 +5,7 @@ on:
     # UTC 21:00 = KST 06:00 (서머타임 무관, KST는 DST 미적용)
     - cron: '0 21 * * *'
     # 보험: GitHub Actions free-tier cron jitter 대비 KST 06:30에 한 번 더
-    # 안정 운영 확인되면 본 라인 제거 (이중 발송 방지)
+    # TODO(2026-05-14 이후 제거): 안정 운영 확인되면 본 라인 제거 (이중 발송 방지)
     - cron: '30 21 * * *'
   workflow_dispatch: {}
 

@@ -157,13 +157,61 @@ prd: null
 | R-5 | 사용자가 Phase 2 확장 시 main.py 구조 모호 | 리팩터링 비용 | 중 | NFR-06: `fetch_indices()`, `build_message()`, `post_slack()` 3개 함수로 명확 분리 |
 | R-6 | 무료 GitHub Actions 한도 초과(repo가 private + 다른 워크플로우 추가) | 결제 발생 | 저 | README에 "월 ~30분 사용" 명시. private 2,000분 한도의 ~1.5% |
 
-## 9. Out of Scope (Phase 2+)
+## 9. Phase 로드맵 (이번 사이클 외 후속 작업)
 
-> Phase 2부터는 별도 feature로 PDCA를 다시 돌린다(`/pdca pm morning-us-index-ai`, `/pdca plan ...`).
+> 각 Phase는 별도 feature로 PDCA를 다시 돌린다.
 
-- **Phase 2 (AI 분석)**: 뉴스 헤드라인 수집(NewsAPI / RSS / Gemini Grounding / Claude web_search) + Gemini API 또는 Claude API로 "왜 시장이 이렇게 움직였는지" 한국어 브리핑 생성. Secrets 추가: `GEMINI_API_KEY` 또는 `ANTHROPIC_API_KEY`.
-- **Phase 3 (확장)**: Dow/Russell/VIX/주요 ETF/환율, 한국 증시 통합, 멀티 채널, 차트 이미지 첨부.
-- **Phase 4 (운영)**: Self-hosted runner로 cron 정확도 향상, 실패 알림 PagerDuty/Discord 라우팅.
+### Phase 1 ✅ 완료 (이번 사이클)
+- ^IXIC, ^GSPC 종가/변동률 → Slack
+- Match Rate 100%, 17 unit/integration tests
+- GitHub Actions cron 자동 발송 (KST 06:00, 보험 06:30)
+
+### Phase 1.5 — yfinance 단독 풍부화 (next, 추천)
+**Feature**: `morning-us-index-v15` · **명령**: `/pdca plan morning-us-index-v15`
+
+추가 데이터 (yfinance만 사용, 비용 0):
+- **지수**: ^DJI(다우), ^RUT(러셀2000), ^VIX(공포지수)
+- **선물**: ES=F(S&P500 mini), NQ=F(나스닥 mini), YM=F(다우 mini) — 한국 새벽 다음장 전망 1순위
+- **개별 종목**: NVDA, TSLA, MSFT, AAPL, AMZN, AVGO, INTC, MU, AMD, GOOGL, META (10–15개)
+- **환율**: USDKRW=X (원/달러)
+- **원자재**: CL=F(WTI), GC=F(금)
+- **시간외 거래**: `Ticker.history(prepost=True)` (종목별 차이 있음)
+
+표시 강화:
+- **수동 섹터 매핑** (반도체/빅테크/EV/금융/에너지 등) — `Ticker.info` 자동 X
+- **사상최고 ★ 표시** — 종가가 52주 최고가 ≈ 일치
+- **단타(상한가 눌림목) 신호 마크**:
+  - 🔥 거래량이 20일 평균의 2배+
+  - 🎯 갭 상승/하락 1.5%+
+  - ⚡ VIX 일중 변동 5%+
+  - 🆙 52주 신고가 도달
+  - 📊 시간외에서 1%+ 추가 변동
+
+예상 작업: 2–4시간. Secrets 추가 0. 메시지 길이 ~25줄.
+
+### Phase 2 — AI/뉴스 분석
+**Feature**: `morning-us-index-ai` · **명령**: `/pdca pm morning-us-index-ai`
+
+- **뉴스 수집**: NewsAPI / Polygon / Tavily / Perplexity
+- **AI 브리핑**: Gemini API 또는 Claude API
+  - "왜 시장이 이렇게 움직였는지" 한국어 종합
+  - 종목별 뉴스 코멘트 ("← 애플 공급 계약 소식")
+  - 거시 + 지정학 + 다음장 시나리오
+- **Secrets 추가**: `NEWSAPI_KEY` 또는 `TAVILY_API_KEY`, `GEMINI_API_KEY` 또는 `ANTHROPIC_API_KEY`
+- **`build_message(quotes, extra_blocks=...)`** 시그니처에 AI 블록 삽입 (Phase 1에서 이미 준비됨)
+
+예상 작업: 1–2일. 운영비 ~$1–10/월 (1일 1회 호출).
+
+### Phase 3 — 한국 시장 통합 / 멀티 채널
+- KOSPI / KOSDAQ / 삼성전자 ADR / 환율 영향 분석
+- 슬랙 다채널 라우팅 (트레이딩 / 거시 / 종목 분리)
+- 차트 이미지 첨부 (matplotlib → PNG → Slack file upload)
+
+### Phase 4 — 운영 강화
+- Self-hosted runner로 cron 정확도 ↑
+- 실패 알림 PagerDuty/Discord 라우팅
+- 도착률 / 정확도 자동 측정 대시보드 (Grafana 등)
+- 장중 실시간 알림 (5% 이상 급등락) — Cloudflare Workers 또는 AWS Lambda (GitHub Actions 5분 한계 우회)
 
 ## 10. Roadmap & Milestones
 
