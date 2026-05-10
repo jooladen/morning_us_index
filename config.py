@@ -110,8 +110,8 @@ DAYTRADE_CANDIDATE_MIN_SIGNALS: int = 2
 # F1: VADER compound |c| ≥ 0.3 만 surface (Plan FR-03)
 NEWS_VADER_COMPOUND_THRESHOLD: float = 0.3
 
-# F1: 헤드라인 80자 초과 시 77자 + "..." (OQ-3)
-NEWS_HEADLINE_MAX_CHARS: int = 80
+# F1: 헤드라인 50자 초과 시 47자 + "..." (OQ-3, v5 50자로 축소 — 모바일 한 줄 가독성)
+NEWS_HEADLINE_MAX_CHARS: int = 50
 
 # F2: ≤ 7일 어닝스만 📅 배지 표시 (Plan FR-04)
 EARNINGS_LOOKAHEAD_DAYS: int = 7

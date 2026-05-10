@@ -298,35 +298,37 @@ def _format_market_mood_line(quotes: list[Quote]) -> str:
 
 
 def _format_candidate_reasons(q: Quote, sig: Signal) -> str:
-    """FR-17: 단타 후보 사유 한글 구체화 — 갭% / 거래량× / 시간외% / 신고가.
+    """FR-17/22 (v5): 단타 후보 사유 — 이모지 + 숫자만 한 줄 압축.
 
     예 입력 → 출력:
-        sig(volume×8.5, gap+13.96%, AH+1.5%) → "거래량 8.5× + 갭 +13.96% + 시간외 +1.5%"
+        sig(volume×8.5, gap+13.96%, AH+1.5%, 52w) → "🔥8.5× 🎯+12.9% 🆙신고 📊+1.4%"
+
+    모바일 한 줄 30폭 이하 목표. 한글 단어 최소화.
     """
-    reasons: list[str] = []
+    parts: list[str] = []
     if sig.is_volume_spike:
         if q.volume_today and q.volume_avg_20d:
             ratio = q.volume_today / q.volume_avg_20d
-            reasons.append(f"거래량 {ratio:.1f}×")
+            parts.append(f"🔥{ratio:.1f}×")
         else:
-            reasons.append("거래량")
+            parts.append("🔥")
     if sig.is_gap:
         if q.open_today and q.prev_close:
             gap = (q.open_today - q.prev_close) / q.prev_close * 100.0
-            reasons.append(f"갭 {gap:+.1f}%")
+            parts.append(f"🎯{gap:+.1f}%")
         else:
-            reasons.append("갭")
+            parts.append("🎯")
     if sig.is_vix_spike:
-        reasons.append("VIX 급등")
+        parts.append("⚡VIX")
     if sig.is_52w_near_high:
-        reasons.append("52주 신고가")
+        parts.append("🆙신고")
     if sig.is_afterhours_move:
         if q.afterhours_close and q.last_close:
             ah = (q.afterhours_close - q.last_close) / q.last_close * 100.0
-            reasons.append(f"시간외 {ah:+.1f}%")
+            parts.append(f"📊{ah:+.1f}%")
         else:
-            reasons.append("시간외")
-    return " + ".join(reasons)
+            parts.append("📊")
+    return " ".join(parts)
 
 
 def _candidate_sort_key(candidate: tuple[Quote, Signal]) -> tuple[int, float]:
@@ -411,33 +413,45 @@ def _build_table_block(rows: list[list[str]], aligns: list[str] | None = None) -
     return out
 
 
-def _format_quote_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]:
-    """단일 Quote를 표의 한 row로 변환.
+def _format_compact_quote(q: Quote, sig: Signal, news: NewsSnapshot | None) -> str:
+    """FR-22 (v5): 모바일 한 줄 압축 형식.
 
-    컬럼: [label, ticker(or ""), price, "▲ +1.50%", marks_with_star_and_badge]
-    FR-21: 색상 이모지 🟢🔴 제거 (▲▼ 부호로 충분). 길이 ↓.
+    예: ``• 엔비디아 NVDA 142 +1.50% 🔥``
+
+    설계 결정:
+    - 가격 정수만 (소수점 제거) — 변동률이 정보 가치 ↑
+    - 색상 이모지 🟢🔴 제거 — 변동률 부호로 대체
+    - ▲▼ 부호 제거 — `+`/`-` 부호로 대체
+    - 단타 신호 마크 + ★ + 📅 배지는 유지 (단타 결정에 필수)
+    - VIX는 (안정/경계/공포) 라벨 inline
     """
     pct = _pct_change(q)
-    if pct > 0:
-        arrow = "▲"
-    elif pct < 0:
-        arrow = "▼"
+    # 가격: 정수만 (천 단위 콤마 유지). 1 이하는 소수점 2자리 (환율/원자재용)
+    if q.last_close >= 100:
+        price_str = f"{q.last_close:,.0f}"
+    elif q.last_close >= 1:
+        price_str = f"{q.last_close:,.1f}"
     else:
-        arrow = "■"
-    price_str = f"{q.last_close:,.2f}"
-    pct_str = f"{arrow} {pct:+.2f}%"
+        price_str = f"{q.last_close:.2f}"
+
+    pct_str = f"{pct:+.2f}%"
     star = "★" if sig.is_all_time_high else ""
     marks = sig.emoji_marks
     badge = ""
     if news is not None and news.has_earnings_badge:
         badge = f"📅{news.days_to_earnings}d"
-    extra = " ".join(filter(None, [star, marks, badge]))
-    # VIX 라벨 inline (FR-20)
+
+    # VIX 라벨 (FR-20)
+    vix_label = ""
     if q.ticker == "^VIX":
-        vix_label = _vix_context_label(q)
-        if vix_label:
-            extra = (extra + " " if extra else "") + f"({vix_label})"
-    return [q.label, q.ticker, price_str, pct_str, extra]
+        label = _vix_context_label(q)
+        if label:
+            vix_label = f"({label})"
+
+    extras = " ".join(filter(None, [star, marks, badge, vix_label]))
+    extras_part = f" {extras}" if extras else ""
+
+    return f"• {q.label} {q.ticker} {price_str} {pct_str}{extras_part}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -559,20 +573,16 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
-    # FR-21: 표 형식 컬럼 정렬 표준 (모든 섹션 공통)
-    # [label, ticker, price (right-aligned), "▲ +1.50%", marks/star/badge]
-    table_aligns = ["left", "left", "right", "left", "left"]
+    # FR-22 (v5): 모바일 한 줄 압축 — 코드블록 폐기, 종목당 한 줄
 
-    # 📈 [지수] — FR-20: VIX 종목 라인 끝에 (안정/경계/공포) 라벨 inline
+    # 📈 [지수]
     if indices:
         lines.append("📈 [지수]")
-        rows = []
         for q in indices:
             sig = signals.get(q.ticker)
             if sig is None:
                 continue
-            rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
-        lines.extend(_build_table_block(rows, aligns=table_aligns))
+            lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
         lines.append("")
 
     # 🎯 [단타 핵심: 선물 + 시간외]
@@ -582,18 +592,16 @@ def build_v15_message(
     )
     if futures or has_ahrs:
         lines.append("🎯 [단타 핵심: 선물 + 시간외]")
-        rows = []
         for q in futures:
             sig = signals.get(q.ticker)
             if sig is not None:
-                rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
-        # AHRS — 시간외 변동 있는 stocks만, 짧은 라인으로
+                lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
+        # AHRS — 시간외 변동 있는 stocks만 짧은 형식
         for q in stocks:
             sig = signals.get(q.ticker)
             if sig is not None and sig.is_afterhours_move and q.afterhours_close and q.last_close:
                 ah_pct = (q.afterhours_close - q.last_close) / q.last_close * 100.0
-                rows.append([f"AHRS {q.ticker}", "", "", f"{ah_pct:+.1f}%", "📊"])
-        lines.extend(_build_table_block(rows, aligns=table_aligns))
+                lines.append(f"• AHRS {q.ticker} {ah_pct:+.1f}% 📊")
         lines.append("")
 
     # 섹터별 stocks (반도체, 빅테크, EV/암호)
@@ -607,25 +615,20 @@ def build_v15_message(
         if not sector_stocks:
             continue
         lines.append(header_label)
-        rows = []
         for q in sector_stocks:
             sig = signals.get(q.ticker)
             if sig is None:
                 continue
-            # 표 형식 일관 — 신호 없어도 한 줄 표시 (이전에는 compact format이었음)
-            rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
-        lines.extend(_build_table_block(rows, aligns=table_aligns))
+            lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
         lines.append("")
 
     # 💰 [거시]
     if macros:
         lines.append("💰 [거시]")
-        rows = []
         for q in macros:
             sig = signals.get(q.ticker)
             if sig is not None:
-                rows.append(_format_quote_row(q, sig, _news_map.get(q.ticker)))
-        lines.extend(_build_table_block(rows, aligns=table_aligns))
+                lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
         lines.append("")
 
     # 💼 [내부자 매수 급증 7일 (≥$1M)] — Phase 2-NoAI F3 (Plan FR-05, FR-10)
@@ -643,18 +646,17 @@ def build_v15_message(
     candidates.sort(key=_candidate_sort_key)
 
     if candidates:
-        lines.append("🚨 [오늘 단타 후보 (신호 2개 이상)]")
+        lines.append("🚨 [오늘 단타 후보]")
         for q, sig in candidates:
-            # FR-21 (v4): 사유는 다음 줄로 분리해서 모바일 한 줄 안 잘리게
+            # FR-22 (v5): 사유에 이모지 포함이라 종목 라인은 종목명+사유 한 줄로 통합
             reason_str = _format_candidate_reasons(q, sig)
-            lines.append(f"• {q.label} {q.ticker} — {sig.emoji_marks}")
-            lines.append(f"    {reason_str}")
-            # Phase 2-NoAI F1: 헤드라인 들여쓰기 (Plan FR-09)
+            lines.append(f"• {q.label} {q.ticker} {reason_str}")
+            # 헤드라인 줄바꿈 (F1) — 50자 truncate라 한 줄 또는 두 줄에 들어감
             news = _news_map.get(q.ticker)
             if news is not None and news.top_headline is not None:
                 title, source, compound = news.top_headline
-                lines.append(f"    📰 {compound:+.2f} \"{title}\" ({source})")
-        lines.append("")  # 후보 섹션 뒤 빈 줄 (푸터 분리)
+                lines.append(f"  📰 {compound:+.2f} \"{title}\" ({source})")
+        lines.append("")
 
     # FR-17: 초보자 가이드 푸터 (메시지 끝 1줄)
     lines.append(FOOTER_BEGINNER_GUIDE)

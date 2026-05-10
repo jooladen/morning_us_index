@@ -140,7 +140,7 @@ def test_volume_spike_emoji_displayed():
 
 
 def test_compact_format_for_no_signal_stock():
-    """v4 표 형식: 모든 종목이 표 한 줄. AMD는 신호 없음 (마크 컬럼 비어있음)."""
+    """v5 압축 형식: 모든 종목이 한 줄 압축, AMD는 신호 없이 단순 라인."""
     quotes = [
         _q("AMD", "AMD", "stock", "반도체", last=100.5, prev=100.0),  # +0.5%, 신호 없음
         _q("NVDA", "엔비디아", "stock", "반도체",
@@ -149,14 +149,14 @@ def test_compact_format_for_no_signal_stock():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # AMD도 표 형식 라인에 등장 (변동률 +0.50%)
+    # AMD 압축 한 줄
     assert "AMD" in msg
     assert "+0.50%" in msg
-    # NVDA는 거래량 마크 + 종목명
+    # NVDA 거래량 마크
     assert "🔥" in msg
     assert "엔비디아" in msg
-    # 표 형식 검증 — code block 등장
-    assert "```" in msg
+    # v5 압축 — 한 줄 형식 (• 종목 ticker 가격 변동률 마크)
+    assert "• 엔비디아 NVDA" in msg
 
 
 # ─────────────────────────────────────────────────────────────
@@ -256,9 +256,9 @@ def test_news_map_none_byte_identical_to_phase15():
 
 
 def test_daytrade_candidate_shows_headline_indent():
-    """L1-msg-13 (v4 갱신): 단타 후보 아래 들여쓰기로 헤드라인 등장 (F1).
+    """L1-msg-13 (v5 갱신): 단타 후보 아래 들여쓰기로 헤드라인 등장 (F1).
 
-    v4: '└ 📰' → 4-space 들여쓰기 + '📰' 형식.
+    v5: 들여쓰기 2-space + '📰' 형식.
     """
     quotes = [
         _q("INTC", "인텔", "stock", "반도체",
@@ -278,8 +278,8 @@ def test_daytrade_candidate_shows_headline_indent():
     assert "-0.55" in msg
     assert "Intel restructures amid weak demand" in msg
     assert "Bloomberg" in msg
-    # 들여쓰기 확인 — 헤드라인이 4 공백으로 시작하는 줄
-    assert "    📰" in msg
+    # v5: 헤드라인이 2 공백으로 시작
+    assert "  📰" in msg
 
 
 def test_earnings_badge_inline_within_7_days():
@@ -384,42 +384,44 @@ def test_vix_label_inline_with_thresholds():
 
 
 def test_daytrade_candidates_sorted_by_signal_count_desc():
-    """L1-msg-20 (FR-16): 단타 후보 신호 수 내림차순 정렬 (강한 신호 먼저)."""
+    """L1-msg-20 (FR-16, v5): 단타 후보 신호 수 내림차순 정렬."""
     quotes = [
         # NVDA: 2 신호 (거래량 + 갭)
         _q("NVDA", "엔비디아", "stock", "반도체",
            last=142, prev=140,
-           open_today=142.5,  # 갭
-           volume_today=2_500_000, volume_avg_20d=1_000_000),  # 거래량
+           open_today=142.5,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),
         # MU: 4 신호 (거래량 + 갭 + 신고가 + 시간외)
         _q("MU", "마이크론", "stock", "반도체",
            last=746, prev=646,
-           open_today=730,  # 갭
-           volume_today=80_000_000, volume_avg_20d=10_000_000,  # 거래량
-           high_52w=747,  # 신고가
-           afterhours_close=757),  # 시간외
+           open_today=730,
+           volume_today=80_000_000, volume_avg_20d=10_000_000,
+           high_52w=747,
+           afterhours_close=757),
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # MU(4 신호)가 NVDA(2 신호)보다 먼저 등장
-    mu_pos = msg.index("마이크론 MU —")
-    nvda_pos = msg.index("엔비디아 NVDA —")
+    # v5: "• 마이크론 MU 🔥..." 형식 (— 없음)
+    # 단타 후보 섹션 안에서 등장 순서 검증
+    candidate_section = msg.split("🚨 [오늘 단타 후보]")[1]
+    mu_pos = candidate_section.index("마이크론 MU")
+    nvda_pos = candidate_section.index("엔비디아 NVDA")
     assert mu_pos < nvda_pos
 
 
 def test_candidate_reasons_show_specific_numbers():
-    """L1-msg-21 (FR-17): 단타 후보 사유에 갭% + 거래량× + 시간외% 구체 숫자 표시."""
+    """L1-msg-21 (FR-17, v5): 단타 후보 사유에 이모지+숫자 압축 형식."""
     quotes = [
         _q("INTC", "인텔", "stock", "반도체",
            last=32.15, prev=28.20,
-           open_today=31.59,  # 갭 +12% 정도
-           volume_today=8_000_000, volume_avg_20d=1_000_000),  # 거래량 8×
+           open_today=31.59,
+           volume_today=8_000_000, volume_avg_20d=1_000_000),
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # 사유 라인에 구체 숫자 등장
-    assert "거래량 8.0×" in msg
-    assert "갭 +12.0%" in msg  # 단순 "갭"이 아닌 "갭 +12.0%"
+    # v5: "🔥8.0×", "🎯+12.0%" 이모지 + 숫자 한 줄
+    assert "🔥8.0×" in msg
+    assert "🎯+12.0%" in msg
 
 
 def test_beginner_footer_appears_at_end():

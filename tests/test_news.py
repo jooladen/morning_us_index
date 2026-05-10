@@ -112,10 +112,10 @@ def test_truncate_short_returns_as_is():
 
 
 def test_truncate_long_adds_ellipsis():
-    """L1-news-8: 80자 초과 — 77자 + '...' 정확히 80자 (OQ-3)."""
+    """L1-news-8 (v5): 50자 초과 — 47자 + '...' 정확히 50자 (OQ-3, v5 50자로 축소)."""
     s = "A" * 100
     result = _truncate(s)
-    assert len(result) == 80
+    assert len(result) == 50
     assert result.endswith("...")
 
 
