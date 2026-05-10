@@ -75,7 +75,7 @@ def test_empty_quotes_raises():
 # ─────────────────────────────────────────────────────────────
 
 def test_daytrade_candidate_section_appears_when_2_signals():
-    """INTC: 갭 + 거래량 = 2 signals → 단타 후보."""
+    """INTC: 갭 + 거래량 = 2 signals → 단타 후보 (v5/v8 이모지 형식)."""
     quotes = [
         _q("INTC", "인텔", "stock", "반도체",
            last=32.15, prev=28.20,
@@ -89,8 +89,9 @@ def test_daytrade_candidate_section_appears_when_2_signals():
 
     assert "[오늘 단타 후보" in msg
     assert "INTC" in msg
-    assert "갭" in msg
-    assert "거래량" in msg
+    # v5: 한글 "갭"/"거래량" → 이모지 + 숫자
+    assert "🎯" in msg  # 갭
+    assert "🔥" in msg  # 거래량
 
 
 def test_no_candidate_section_when_no_signals():
@@ -442,24 +443,16 @@ def test_message_dump_and_width_diagnostics(capsys):
     assert "max line width:" in out
 
 
-def test_beginner_footer_appears_at_end():
-    """L1-msg-22 (FR-17/24, v7): 범례를 메시지 상단으로 이동 (시장 동향 라인 다음).
+def test_no_legend_line_in_v8():
+    """L1-msg-22 (FR-27, v8): 범례 라인 제거 — 종목 옆 마크로 의미 자명.
 
-    v7: 푸터 → 상단 범례. 메시지 상단 영역에 등장.
+    사용자 요청 (v8): "신호 앞에 아이콘 제거" → 💡 신호: ... 라인 자체 제거.
     """
     quotes = [
         _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    assert "💡 신호:" in msg
-    assert "🔥거래량" in msg
-    assert "🎯갭" in msg
-    assert "★사상최고" in msg
-    # v7: 범례가 상단 영역 (메시지 시작 ~ 첫 섹션 헤더 사이)
-    first_section_idx = msg.find("[지수]")
-    if first_section_idx == -1:
-        first_section_idx = msg.find("[반도체]")
-    assert first_section_idx > 0, "섹션 헤더가 메시지에 있어야 함"
-    legend_idx = msg.find("💡 신호:")
-    assert 0 < legend_idx < first_section_idx, "범례는 첫 섹션 전에 등장해야 함"
+    # v8: 범례 라인 자체 미등장
+    assert "💡 신호:" not in msg
+    assert "🔥거래량" not in msg  # 푸터/범례 문자열은 없음

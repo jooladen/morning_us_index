@@ -448,9 +448,10 @@ def _quote_to_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]
 
 
 def _build_compact_table(rows: list[list[str]]) -> list[str]:
-    """rows를 ```code block``` + 컬럼 자동 폭 정렬.
+    """rows를 ```code block``` + 컬럼 자동 폭 정렬 + row 사이 구분선.
 
     Aligns: [left, left, right, left, left]
+    FR-28 (v8): 각 종목 라인 사이에 ─ 구분선 (마지막 종목 뒤는 X).
     """
     if not rows:
         return []
@@ -463,7 +464,13 @@ def _build_compact_table(rows: list[list[str]]) -> list[str]:
             w = _display_width(str(cell))
             if w > col_widths[i]:
                 col_widths[i] = w
+
+    # 컬럼 폭 합계 (구분선 길이용) — col_widths + 컬럼 간 공백 1자
+    total_width = sum(col_widths) + max(0, n_cols - 1)
+    separator = "─" * total_width
+
     out = ["```"]
+    formatted_rows: list[str] = []
     for r in rows:
         parts = []
         for i in range(n_cols):
@@ -474,7 +481,13 @@ def _build_compact_table(rows: list[list[str]]) -> list[str]:
                 parts.append(_pad_left(cell, col_widths[i]))
             else:
                 parts.append(_pad_right(cell, col_widths[i]))
-        out.append(" ".join(parts).rstrip())
+        formatted_rows.append(" ".join(parts).rstrip())
+
+    # row 사이 구분선 삽입
+    for i, row_line in enumerate(formatted_rows):
+        out.append(row_line)
+        if i < len(formatted_rows) - 1:
+            out.append(separator)
     out.append("```")
     return out
 
@@ -639,12 +652,7 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
-    # FR-24 (v7): 범례를 메시지 상단으로 이동 (사용자 요청 — 푸터는 제거)
-    lines.append(FOOTER_BEGINNER_GUIDE)
-    lines.append("")
-
-    # FR-25 (v7): 섹션 헤더 prefix 이모지 제거 (단타 신호 이모지와 혼동 방지)
-    # FR-26 (v7): 표 형식 부활 — code block + 컬럼 정렬
+    # FR-27 (v8): 범례 라인 제거 — 종목 옆 마크 + 단타 후보 사유로 의미 자명
 
     # [지수]
     if indices:
