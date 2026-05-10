@@ -99,7 +99,7 @@ Phase 1 메시지 (현재):
 |---|---|---|
 | FR-01 | INDICES 확장: ^IXIC, ^GSPC, **^DJI(다우), ^RUT(러셀2000), ^VIX(공포지수)** | 5개 |
 | FR-02 | FUTURES 추가: **ES=F(S&P 미니), NQ=F(나스닥 미니), YM=F(다우 미니)** | 한국 새벽 다음장 전망 1순위 |
-| FR-03 | STOCKS 추가: **NVDA, TSLA, MSFT, AAPL, AMZN, AVGO, INTC, MU, AMD, GOOGL, META, TSMC, ASML, COIN** | 11(빅테크/반도체) + 3(한국 ADR/암호) = 14 |
+| FR-03 | STOCKS 추가: **NVDA, TSLA, MSFT, AAPL, AMZN, AVGO, INTC, MU, AMD, GOOGL, META, TSMC(Yahoo ADR ticker: `TSM`), ASML, COIN** | 11(빅테크/반도체) + 3(한국 ADR/암호) = 14. TSMC는 NYSE ADR `TSM`으로 yfinance 호출 (Design §4.1) |
 | FR-04 | MACRO 추가: **USDKRW=X(원/달러), CL=F(WTI), GC=F(금), BTC-USD(비트코인)** | 4개, 거시 흐름 |
 | FR-05 | SECTOR_MAP 수동 매핑: 반도체 / 빅테크 / EV·자동차 / 암호화폐 / 지수 / 거시 | hard-coded dict |
 | FR-06 | 단타 신호 자동 마크 — 5종 임계값 ||
