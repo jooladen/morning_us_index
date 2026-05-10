@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Iterable
 from zoneinfo import ZoneInfo
@@ -24,6 +24,7 @@ import yfinance as yf
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from config import (
+    COMPANY_NAMES_EN,
     EARNINGS_LOOKAHEAD_DAYS,
     INSIDER_BUY_USD_THRESHOLD,
     INSIDER_LOOKBACK_DAYS,
@@ -161,14 +162,67 @@ def _translate_to_korean(text: str) -> str:
 # Per-ticker fetchers (각각 fail-open)
 # ─────────────────────────────────────────────────────────────
 
+def _ticker_matches_title(ticker: str, title: str) -> bool:
+    """FR-14: 헤드라인이 해당 ticker의 회사에 대한 것인지 휴리스틱 판단.
+
+    매칭 순서:
+        1. ticker symbol (예: 'NVDA')
+        2. 영문 회사명 (COMPANY_NAMES_EN) (예: 'Nvidia', 'NVIDIA')
+        3. 한글 label 미지원 (yfinance.news는 영문 결과만 반환)
+
+    Returns:
+        True if title contains ticker or any known company name (case-insensitive).
+    """
+    if not title:
+        return False
+    title_lower = title.lower()
+    # 1차: ticker symbol — 단어 경계까지는 안 보고 substring (헤드라인 짧음)
+    if ticker.lower() in title_lower:
+        return True
+    # 2차: 영문 회사명
+    for name in COMPANY_NAMES_EN.get(ticker, []):
+        if name.lower() in title_lower:
+            return True
+    return False
+
+
+def _select_headline(
+    items: list, *, prefer_ticker: str | None = None
+) -> tuple[str, str, float] | None:
+    """후보 items에서 ``|compound| ≥ 0.3`` 통과한 첫 헤드라인 반환.
+
+    Args:
+        items: yfinance.Ticker.news 결과 list (각 dict).
+        prefer_ticker: 지정 시 해당 ticker/회사명 포함 헤드라인 우선 (FR-14).
+
+    Returns:
+        (title_raw, source, compound) — 번역/truncate는 호출자가 적용.
+    """
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = _extract_title(item)
+        if not title:
+            continue
+        if prefer_ticker is not None and not _ticker_matches_title(prefer_ticker, title):
+            continue
+        compound = _score_headline(title)
+        if abs(compound) < NEWS_VADER_COMPOUND_THRESHOLD:
+            continue
+        source = _extract_source(item)
+        return (title, source, compound)
+    return None
+
+
 def fetch_news_for_ticker(ticker: str) -> tuple[str, str, float] | None:
     """yfinance.Ticker.news 첫 번째 적합 항목 → (title_truncated, source, compound).
 
     Plan FR-03: ``|compound| < NEWS_VADER_COMPOUND_THRESHOLD`` 면 surface 안 함.
     Plan FR-07: 어떤 예외든 None으로 swallow.
+    Plan FR-14 (v3): 2-pass — ticker/회사명 매칭 헤드라인 우선, 없으면 일반 헤드라인.
 
     Returns:
-        (truncated_title, publisher, compound) or None.
+        (truncated_translated_title, publisher, compound) or None.
     """
     try:
         items = yf.Ticker(ticker).news or []
@@ -176,24 +230,20 @@ def fetch_news_for_ticker(ticker: str) -> tuple[str, str, float] | None:
         sys.stderr.write(f"[WARN] news fetch failed for {ticker}: {type(e).__name__}\n")
         return None
 
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        # yfinance ≥ 0.2.40: 항목이 {'content': {'title': ..., 'provider': {'displayName': ...}}}로 중첩될 수도 있음
-        title = _extract_title(item)
-        if not title:
-            continue
-        source = _extract_source(item)
-        compound = _score_headline(title)  # FR-03: VADER는 영문 원문으로 계산
-        if abs(compound) < NEWS_VADER_COMPOUND_THRESHOLD:
-            continue  # 다음 헤드라인 시도
-        # FR-13: 한글 번역 (env flag false면 영문 그대로). 실패 시 원문 fallback.
-        display_title = (
-            _translate_to_korean(title) if is_news_translation_enabled() else title
-        )
-        return (_truncate(display_title), source, compound)
+    # FR-14: 1차 pass — ticker/회사명 매칭된 헤드라인 우선
+    selected = _select_headline(items, prefer_ticker=ticker)
+    # 2차 pass — 매칭 없으면 일반 적합 헤드라인 (기존 동작 호환)
+    if selected is None:
+        selected = _select_headline(items, prefer_ticker=None)
+    if selected is None:
+        return None
 
-    return None
+    title, source, compound = selected
+    # FR-13: 한글 번역 (env flag false면 영문 그대로). 실패 시 원문 fallback.
+    display_title = (
+        _translate_to_korean(title) if is_news_translation_enabled() else title
+    )
+    return (_truncate(display_title), source, compound)
 
 
 def _extract_title(item: dict) -> str:
@@ -376,5 +426,19 @@ def fetch_news_all(stocks: Iterable[Quote]) -> dict[str, NewsSnapshot]:
                 f"[WARN] fetch_news_all overall timeout {overall_timeout}s — "
                 f"returning partial results ({len(results)}/{len(tickers)})\n"
             )
+
+    # FR-14: 헤드라인 dedupe — 같은 헤드라인이 여러 ticker에 매칭되면 첫 등장만 유지
+    # 입력 stocks 순서대로 우선순위 부여 (frozen dataclass라 dataclasses.replace 사용)
+    seen_titles: set[str] = set()
+    for ticker in tickers:
+        ns = results.get(ticker)
+        if ns is None or ns.top_headline is None:
+            continue
+        title = ns.top_headline[0]
+        if title in seen_titles:
+            # 중복 — 헤드라인만 제거, 어닝스/인사이더는 유지
+            results[ticker] = replace(ns, top_headline=None)
+        else:
+            seen_titles.add(title)
 
     return results

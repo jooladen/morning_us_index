@@ -329,3 +329,94 @@ def test_insider_section_omitted_when_no_significant_buys():
     msg = build_v15_message(quotes, sigs, news_map=news_map)
     assert "💼" not in msg
     assert "내부자 매수" not in msg
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI v3 — UX 개선 (FR-15/16/17/20, +4 케이스)
+# 운영 후 추가
+# ─────────────────────────────────────────────────────────────
+
+def test_market_mood_line_appears_in_header():
+    """L1-msg-18 (FR-15): 시장 동향 한 줄이 헤더 직후 등장 — 상승/하락 카운트 + VIX 라벨."""
+    quotes = [
+        _q("^VIX", "VIX", "index", last=17.19, prev=17.08),  # 안정 (<20)
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),  # 상승
+        _q("INTC", "인텔", "stock", "반도체", last=32, prev=33),  # 하락
+        _q("AMD", "AMD", "stock", "반도체", last=100, prev=99),  # 상승
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "📊 상승 2 / 하락 1" in msg
+    assert "VIX 17.19" in msg
+    assert "(안정)" in msg
+
+
+def test_vix_label_inline_with_thresholds():
+    """L1-msg-19 (FR-20): VIX 종목 라인 끝에 (안정/경계/공포) 라벨 inline."""
+    # 안정: <20
+    quotes_a = [_q("^VIX", "VIX", "index", last=15.0, prev=15.0)]
+    msg_a = build_v15_message(quotes_a, compute_signals(quotes_a))
+    assert "(안정)" in msg_a
+    # 경계: 20-25
+    quotes_b = [_q("^VIX", "VIX", "index", last=22.0, prev=22.0)]
+    msg_b = build_v15_message(quotes_b, compute_signals(quotes_b))
+    assert "(경계)" in msg_b
+    # 공포: >=25
+    quotes_c = [_q("^VIX", "VIX", "index", last=30.0, prev=30.0)]
+    msg_c = build_v15_message(quotes_c, compute_signals(quotes_c))
+    assert "(공포)" in msg_c
+
+
+def test_daytrade_candidates_sorted_by_signal_count_desc():
+    """L1-msg-20 (FR-16): 단타 후보 신호 수 내림차순 정렬 (강한 신호 먼저)."""
+    quotes = [
+        # NVDA: 2 신호 (거래량 + 갭)
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           open_today=142.5,  # 갭
+           volume_today=2_500_000, volume_avg_20d=1_000_000),  # 거래량
+        # MU: 4 신호 (거래량 + 갭 + 신고가 + 시간외)
+        _q("MU", "마이크론", "stock", "반도체",
+           last=746, prev=646,
+           open_today=730,  # 갭
+           volume_today=80_000_000, volume_avg_20d=10_000_000,  # 거래량
+           high_52w=747,  # 신고가
+           afterhours_close=757),  # 시간외
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    # MU(4 신호)가 NVDA(2 신호)보다 먼저 등장
+    mu_pos = msg.index("마이크론 MU —")
+    nvda_pos = msg.index("엔비디아 NVDA —")
+    assert mu_pos < nvda_pos
+
+
+def test_candidate_reasons_show_specific_numbers():
+    """L1-msg-21 (FR-17): 단타 후보 사유에 갭% + 거래량× + 시간외% 구체 숫자 표시."""
+    quotes = [
+        _q("INTC", "인텔", "stock", "반도체",
+           last=32.15, prev=28.20,
+           open_today=31.59,  # 갭 +12% 정도
+           volume_today=8_000_000, volume_avg_20d=1_000_000),  # 거래량 8×
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    # 사유 라인에 구체 숫자 등장
+    assert "거래량 8.0×" in msg
+    assert "갭 +12.0%" in msg  # 단순 "갭"이 아닌 "갭 +12.0%"
+
+
+def test_beginner_footer_appears_at_end():
+    """L1-msg-22 (FR-17): 메시지 끝에 초보자 가이드 푸터 한 줄."""
+    quotes = [
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "💡 신호:" in msg
+    assert "🔥거래량" in msg
+    assert "🎯갭" in msg
+    assert "★사상최고" in msg
+    # 푸터가 메시지의 마지막 줄 근처
+    last_line = msg.rstrip().split("\n")[-1]
+    assert "💡" in last_line

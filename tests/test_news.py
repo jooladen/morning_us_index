@@ -451,3 +451,82 @@ def test_fetch_news_keeps_english_when_disabled(monkeypatch):
     title, _, _ = result
     assert title == "Stock crashes, plunges, terrible loss"
     assert "SHOULD_NOT_BE_CALLED" not in title
+
+
+# ═════════════════════════════════════════════════════════════
+# FR-14 — 종목 매칭 우선순위 + dedupe (v3 운영 후 추가, 4 케이스)
+# ═════════════════════════════════════════════════════════════
+
+from news import _ticker_matches_title  # noqa: E402
+
+
+def test_ticker_matches_title_by_symbol():
+    """L1-news-29: ticker symbol이 헤드라인에 있으면 매칭."""
+    assert _ticker_matches_title("AMD", "AMD surges on AI chip demand") is True
+    assert _ticker_matches_title("AMD", "Nvidia gains while AMD lags") is True
+
+
+def test_ticker_matches_title_by_company_name():
+    """L1-news-30: 영문 회사명이 헤드라인에 있으면 매칭 (COMPANY_NAMES_EN)."""
+    assert _ticker_matches_title("NVDA", "Nvidia beats Q3 estimates") is True
+    assert _ticker_matches_title("TSM", "Taiwan Semiconductor reports record revenue") is True
+    # ticker 본인 아닌 종목 헤드라인 — 매칭 안 됨
+    assert _ticker_matches_title("NVDA", "AMD surges on AI chip") is False
+
+
+def test_fetch_news_prefers_ticker_matched_headline(_translate_passthrough):
+    """L1-news-31: 일반 헤드라인보다 ticker/회사명 매칭 헤드라인 우선."""
+    items = [
+        {"title": "Wall Street rallies on broad gains, record profit",  # 일반, |c|≥0.3 통과
+         "publisher": "Yahoo"},
+        {"title": "Nvidia surges on breakthrough chip, terrific performance",  # NVDA 매칭, |c|≥0.3 통과
+         "publisher": "Reuters"},
+    ]
+    with patch("news.yf.Ticker", return_value=_FakeTickerNews(items)):
+        result = fetch_news_for_ticker("NVDA")
+    assert result is not None
+    title, source, _ = result
+    assert "Nvidia" in title  # 두 번째 항목이 우선 선택됨
+    assert source == "Reuters"
+
+
+def test_fetch_news_falls_back_to_general_when_no_ticker_match(_translate_passthrough):
+    """L1-news-32: ticker 매칭 헤드라인 없으면 일반 헤드라인 fallback."""
+    items = [
+        {"title": "Wall Street rallies on broad gains, record profit",
+         "publisher": "Yahoo"},
+    ]
+    with patch("news.yf.Ticker", return_value=_FakeTickerNews(items)):
+        result = fetch_news_for_ticker("NVDA")
+    # NVDA 매칭 없지만, 임계값 통과한 일반 헤드라인이 fallback으로 반환
+    assert result is not None
+    title, _, _ = result
+    assert "Wall Street" in title
+
+
+def test_fetch_news_all_dedupes_shared_headlines():
+    """L1-news-33: fetch_news_all에서 같은 헤드라인이 여러 ticker에 매칭되면 첫만 유지."""
+    tickers = ["NVDA", "AMD", "MU"]
+    stocks = [_stock_quote(t) for t in tickers]
+
+    shared_headline = ("AI chip rally lifts semiconductor sector", "Reuters", 0.5)
+
+    def fake_build(ticker):
+        return NewsSnapshot(
+            ticker=ticker,
+            top_headline=shared_headline,  # 셋 다 같은 헤드라인
+            next_earnings_date=None,
+            days_to_earnings=None,
+            insider_net_buy_usd_7d=500_000.0,  # 인사이더는 dedupe X
+        )
+
+    with patch("news._build_snapshot", side_effect=fake_build):
+        result = fetch_news_all(stocks)
+
+    # NVDA만 headline 유지, AMD/MU는 None (dedupe)
+    assert result["NVDA"].top_headline is not None
+    assert result["AMD"].top_headline is None
+    assert result["MU"].top_headline is None
+    # 인사이더는 유지됨 (dedupe 대상 아님)
+    assert result["NVDA"].insider_net_buy_usd_7d == 500_000.0
+    assert result["AMD"].insider_net_buy_usd_7d == 500_000.0

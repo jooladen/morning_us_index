@@ -1171,6 +1171,36 @@ morning_us_index/
 | Version | Date | Changes | Author |
 |---|---|---|---|
 | 0.1 | 2026-05-11 | Initial draft. Option C(Pragmatic) 자동 선택 (사용자 무중단 요청). Plan OQ-1~OQ-5 5개 모두 해소. 22+6=28 신규 테스트 케이스 정의. | jooladen (with Ally) |
+| 0.2 | 2026-05-11 | FR-13 한글 번역 추가 (deep-translator). `_translate_to_korean` fail-open. 신규 6 테스트 (test_news.py 28 케이스). | jooladen (with Ally) |
+| 0.3 | 2026-05-11 | v3 UX 개선 사이클 (운영 후): FR-14 헤드라인 종목 매칭+dedupe / FR-15 시장 동향 헤더 / FR-16 단타 후보 정렬 / FR-17 초보자 푸터+사유 구체화 / FR-19 종목 라인 압축 / FR-20 VIX 라벨. 신규 10 테스트 (test_news.py 33 + test_v15_message.py 22 = 55). | jooladen (with Ally) |
+
+## §15 v3 변경 요약 (Phase 2-NoAI v3, 2026-05-11)
+
+**Trigger**: 운영 첫 발송 후 발견된 4가지 이슈
+1. F1 헤드라인이 종목 간 공유됨 (MU/AMD가 같은 일반 AI 기사 매칭) — FR-14
+2. 슬랙 모바일 좁은 화면에서 종목 라인 가독성 부족 — FR-19
+3. 트레이딩 용어 진입장벽 (단타 후보 사유가 "갭 + 거래량" 추상적) — FR-17
+4. Ally 추가 제안 — 시장 동향 헤더(FR-15) + 단타 후보 정렬(FR-16) + VIX 라벨(FR-20)
+
+**구현 영향**:
+- `config.py`: +12 lines (COMPANY_NAMES_EN, VIX_LABEL_*, FOOTER_BEGINNER_GUIDE)
+- `news.py`: +30 lines (_ticker_matches_title, _select_headline, dedupe in fetch_news_all)
+- `main.py`: +60 lines (_format_market_mood_line, _vix_context_label, _format_candidate_reasons, _candidate_sort_key, _pct_change, build_v15_message 통합)
+- `tests/test_news.py`: +5 케이스 (28→33), `tests/test_v15_message.py`: +5 케이스 (17→22)
+- **회귀 0** (109/109 unit pass)
+
+**메시지 형식 비교** (예시):
+```
+[BEFORE v2]                                  [AFTER v3]
+• 마이크론 MU: 746.81  ▲ +100.18 (+15.49%)  • 마이크론 MU: 746.81 ▲ +15.49% 🟢 ★ 🔥🎯🆙📊
+   🟢 ★ 🔥🎯🆙📊
+🚨 [오늘 단타 후보]                          📊 상승 8 / 하락 6 / VIX 17.19 (안정)
+• MU — 🔥🎯🆙📊 (거래량 + 갭 + 신고가...)   ...
+                                              🚨 [오늘 단타 후보]
+                                              • MU — 🔥🎯🆙📊 (거래량 8.0× + 갭 +12.9% + ...)
+                                              ...
+                                              💡 신호: 🔥거래량 🎯갭 🆙신고가 ...
+```
 
 ---
 

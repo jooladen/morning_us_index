@@ -137,6 +137,41 @@ NEWS_TRANSLATION_TIMEOUT_SEC: float = 3.0
 
 
 # ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI v3 — UX 개선 (FR-14 ~ FR-20)
+# 운영 발견: 헤드라인 종목 매칭 부정확 + 좁은 모바일 가독성 + 초보자 진입장벽
+# ─────────────────────────────────────────────────────────────
+
+# FR-14: 헤드라인 종목별 매칭 정확도용 영문 회사명 사전
+# yfinance.Ticker.news 결과 중 title에 ticker/회사명 포함된 항목 우선 매칭.
+COMPANY_NAMES_EN: dict[str, list[str]] = {
+    "NVDA":  ["Nvidia", "NVIDIA"],
+    "TSLA":  ["Tesla"],
+    "MSFT":  ["Microsoft"],
+    "AAPL":  ["Apple"],
+    "AMZN":  ["Amazon"],
+    "AVGO":  ["Broadcom"],
+    "INTC":  ["Intel"],
+    "MU":    ["Micron"],
+    "AMD":   ["AMD", "Advanced Micro"],
+    "GOOGL": ["Google", "Alphabet"],
+    "META":  ["Meta", "Facebook"],
+    "TSM":   ["TSMC", "Taiwan Semiconductor"],
+    "ASML":  ["ASML"],
+    "COIN":  ["Coinbase"],
+}
+
+# FR-20: VIX 컨텍스트 라벨 임계값
+# VIX < 20: 안정 / 20–25: 경계 / >= 25: 공포 (CBOE 일반 가이드)
+VIX_LABEL_STABLE_MAX: float = 20.0
+VIX_LABEL_CAUTION_MAX: float = 25.0
+
+# FR-17: 초보자 가이드 푸터 (메시지 끝 1줄)
+FOOTER_BEGINNER_GUIDE: str = (
+    "💡 신호: 🔥거래량 🎯갭 🆙신고가 📊시간외 ⚡VIX급등 ★사상최고"
+)
+
+
+# ─────────────────────────────────────────────────────────────
 
 def load_slack_webhook_url() -> str:
     """SLACK_WEBHOOK_URL 환경변수를 읽어 반환.

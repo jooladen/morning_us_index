@@ -19,6 +19,7 @@ import yfinance as yf
 
 from config import (
     DAYTRADE_CANDIDATE_MIN_SIGNALS,
+    FOOTER_BEGINNER_GUIDE,
     HTTP_CONNECT_TIMEOUT_SEC,
     HTTP_READ_TIMEOUT_SEC,
     RETRY_ATTEMPTS,
@@ -27,6 +28,8 @@ from config import (
     STALE_THRESHOLD_DAYS,
     TICKERS,
     TIMEZONE_KST,
+    VIX_LABEL_CAUTION_MAX,
+    VIX_LABEL_STABLE_MAX,
     YFINANCE_PERIOD,
     is_news_enabled,
     load_slack_webhook_url,
@@ -213,7 +216,11 @@ def post_slack(webhook_url: str, message: str) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def _format_v15_quote_line(q: Quote, sig: Signal) -> str:
-    """Phase 1.5 종목 라인 — 신호 마크 + ★ 포함."""
+    """Phase 1.5 종목 라인 — 신호 마크 + ★ 포함.
+
+    FR-19 (v3): 절대 변동 (예: ``+100.18``) 생략, 변동률만 표시 (괄호 제거).
+    좁은 모바일 슬랙 가독성 ↑.
+    """
     delta = q.last_close - q.prev_close
     pct = (delta / q.prev_close) * 100.0 if q.prev_close else 0.0
 
@@ -230,8 +237,8 @@ def _format_v15_quote_line(q: Quote, sig: Signal) -> str:
 
     return (
         f"• {q.label} {q.ticker}: "
-        f"{q.last_close:,.2f}  "
-        f"{arrow} {delta:+.2f} ({pct:+.2f}%) {emoji}{star}{marks_str}"
+        f"{q.last_close:,.2f} "
+        f"{arrow} {pct:+.2f}% {emoji}{star}{marks_str}"
     )
 
 
@@ -239,6 +246,92 @@ def _format_compact_line(q: Quote) -> str:
     """신호 없는 종목 1줄 압축 (라벨 + 변동률만)."""
     pct = ((q.last_close - q.prev_close) / q.prev_close * 100.0) if q.prev_close else 0.0
     return f"• {q.label}: {pct:+.2f}%"
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 2-NoAI v3 — UX 개선 헬퍼 (FR-15/16/17/19/20)
+# ─────────────────────────────────────────────────────────────
+
+def _pct_change(q: Quote) -> float:
+    """단순 변동률 % (소수)."""
+    if not q.prev_close:
+        return 0.0
+    return (q.last_close - q.prev_close) / q.prev_close * 100.0
+
+
+def _vix_context_label(vix_quote: Quote | None) -> str:
+    """FR-20: VIX 컨텍스트 라벨 — 안정 / 경계 / 공포.
+
+    임계: <20 안정 / 20–25 경계 / >=25 공포 (CBOE 일반 가이드).
+    """
+    if vix_quote is None or not vix_quote.last_close:
+        return ""
+    v = vix_quote.last_close
+    if v < VIX_LABEL_STABLE_MAX:
+        return "안정"
+    if v < VIX_LABEL_CAUTION_MAX:
+        return "경계"
+    return "공포"
+
+
+def _format_market_mood_line(quotes: list[Quote]) -> str:
+    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨.
+
+    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정)``.
+    """
+    stock_pcts = [_pct_change(q) for q in quotes if q.category == "stock"]
+    up_count = sum(1 for p in stock_pcts if p > 0)
+    down_count = sum(1 for p in stock_pcts if p < 0)
+
+    vix_quote = next((q for q in quotes if q.ticker == "^VIX"), None)
+    if vix_quote is not None and vix_quote.last_close:
+        label = _vix_context_label(vix_quote)
+        vix_text = (
+            f"VIX {vix_quote.last_close:.2f} ({label})" if label
+            else f"VIX {vix_quote.last_close:.2f}"
+        )
+    else:
+        vix_text = "VIX N/A"
+
+    return f"📊 상승 {up_count} / 하락 {down_count} / {vix_text}"
+
+
+def _format_candidate_reasons(q: Quote, sig: Signal) -> str:
+    """FR-17: 단타 후보 사유 한글 구체화 — 갭% / 거래량× / 시간외% / 신고가.
+
+    예 입력 → 출력:
+        sig(volume×8.5, gap+13.96%, AH+1.5%) → "거래량 8.5× + 갭 +13.96% + 시간외 +1.5%"
+    """
+    reasons: list[str] = []
+    if sig.is_volume_spike:
+        if q.volume_today and q.volume_avg_20d:
+            ratio = q.volume_today / q.volume_avg_20d
+            reasons.append(f"거래량 {ratio:.1f}×")
+        else:
+            reasons.append("거래량")
+    if sig.is_gap:
+        if q.open_today and q.prev_close:
+            gap = (q.open_today - q.prev_close) / q.prev_close * 100.0
+            reasons.append(f"갭 {gap:+.1f}%")
+        else:
+            reasons.append("갭")
+    if sig.is_vix_spike:
+        reasons.append("VIX 급등")
+    if sig.is_52w_near_high:
+        reasons.append("52주 신고가")
+    if sig.is_afterhours_move:
+        if q.afterhours_close and q.last_close:
+            ah = (q.afterhours_close - q.last_close) / q.last_close * 100.0
+            reasons.append(f"시간외 {ah:+.1f}%")
+        else:
+            reasons.append("시간외")
+    return " + ".join(reasons)
+
+
+def _candidate_sort_key(candidate: tuple[Quote, Signal]) -> tuple[int, float]:
+    """FR-16: 단타 후보 정렬 키 — 신호 수 내림차순, 변동률 절댓값 내림차순."""
+    q, sig = candidate
+    return (-sig.signal_count, -abs(_pct_change(q)))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -350,7 +443,10 @@ def build_v15_message(
             f"직전 거래일: {last_trading_date.isoformat()}"
         )
 
-    lines: list[str] = [header, ""]
+    # FR-15: 시장 동향 한 줄 (헤더 직후)
+    mood_line = _format_market_mood_line(quotes)
+
+    lines: list[str] = [header, mood_line, ""]
 
     # 카테고리별 분류
     indices = [q for q in quotes if q.category == "index"]
@@ -358,13 +454,19 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
-    # 📈 [지수]
+    # 📈 [지수] — FR-20: VIX 종목 라인 끝에 (안정/경계/공포) 라벨 inline
     if indices:
         lines.append("📈 [지수]")
         for q in indices:
             sig = signals.get(q.ticker)
-            if sig is not None:
-                lines.append(_format_v15_quote_line(q, sig))
+            if sig is None:
+                continue
+            line = _format_v15_quote_line(q, sig)
+            if q.ticker == "^VIX":
+                vix_label = _vix_context_label(q)
+                if vix_label:
+                    line = f"{line} ({vix_label})"
+            lines.append(line)
         lines.append("")
 
     # 🎯 [단타 핵심: 선물 + 시간외]
@@ -432,26 +534,23 @@ def build_v15_message(
         if sig is not None and sig.signal_count >= DAYTRADE_CANDIDATE_MIN_SIGNALS:
             candidates.append((q, sig))
 
+    # FR-16: 신호 수 내림차순, 변동률 절댓값 내림차순으로 정렬 (강한 신호 먼저)
+    candidates.sort(key=_candidate_sort_key)
+
     if candidates:
         lines.append("🚨 [오늘 단타 후보 (신호 2개 이상)]")
         for q, sig in candidates:
-            reasons: list[str] = []
-            if sig.is_volume_spike:
-                reasons.append("거래량")
-            if sig.is_gap:
-                reasons.append("갭")
-            if sig.is_vix_spike:
-                reasons.append("VIX 급등")
-            if sig.is_52w_near_high:
-                reasons.append("52주 신고가")
-            if sig.is_afterhours_move:
-                reasons.append("시간외")
-            reason_str = " + ".join(reasons)
+            # FR-17: 사유 한글 구체화 (갭% / 거래량× / 시간외%)
+            reason_str = _format_candidate_reasons(q, sig)
             lines.append(f"• {q.label} {q.ticker} — {sig.emoji_marks} ({reason_str})")
             # Phase 2-NoAI F1: 헤드라인 들여쓰기 (Plan FR-09)
             headline_line = _format_daytrade_headline(_news_map.get(q.ticker))
             if headline_line is not None:
                 lines.append(headline_line)
+        lines.append("")  # 후보 섹션 뒤 빈 줄 (푸터 분리)
+
+    # FR-17: 초보자 가이드 푸터 (메시지 끝 1줄)
+    lines.append(FOOTER_BEGINNER_GUIDE)
 
     msg = "\n".join(lines).rstrip()
     return _compress_if_needed(msg)
