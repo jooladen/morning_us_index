@@ -424,6 +424,25 @@ def test_candidate_reasons_show_specific_numbers():
     assert "🎯+12.0%" in msg
 
 
+def test_message_dump_and_width_diagnostics(capsys):
+    """L1-msg-23 (FR-23, v6): _print_message_dump + _print_width_diagnostics 동작."""
+    from main import _print_message_dump, _print_width_diagnostics
+
+    msg = "📅 2026-05-11\n• 엔비디아 NVDA 142 +1.50% 🔥\n💡 푸터"
+    _print_message_dump(msg)
+    _print_width_diagnostics(msg)
+    out = capsys.readouterr().out
+    # marker 등장
+    assert "===MSG-DUMP-BEGIN===" in out
+    assert "===MSG-DUMP-END===" in out
+    assert "===WIDTH-DIAG-BEGIN===" in out
+    assert "===WIDTH-DIAG-END===" in out
+    # 메시지 본문 포함
+    assert "엔비디아 NVDA" in out
+    # 폭 진단에 max line width 표시
+    assert "max line width:" in out
+
+
 def test_beginner_footer_appears_at_end():
     """L1-msg-22 (FR-17): 메시지 끝에 초보자 가이드 푸터 한 줄."""
     quotes = [

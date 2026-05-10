@@ -680,11 +680,67 @@ def _compress_if_needed(msg: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
+# FR-23 (v6): 슬랙 발송 메시지 자동 dump + 폭 진단
+# 사용자가 모바일 스크린샷 안 찍어도 Ally가 Actions log로 메시지 검증 가능.
+# ─────────────────────────────────────────────────────────────
+
+# 모바일 슬랙 한 줄 표시 가능 폭 추정 (한국어 wide 환산)
+MOBILE_LINE_WIDTH_THRESHOLD: int = 25
+
+
+def _print_message_dump(message: str) -> None:
+    """메시지 본문을 stdout에 marker 감싸 출력 (Actions log/터미널용).
+
+    Ally(또는 사용자)가 ``gh run view <id> --log``로 메시지 본문 추출 가능:
+        gh run view <id> --log | sed -n '/===MSG-DUMP-BEGIN===/,/===MSG-DUMP-END===/p'
+    """
+    print("\n===MSG-DUMP-BEGIN===")
+    print(message)
+    print("===MSG-DUMP-END===\n")
+
+
+def _print_width_diagnostics(message: str) -> None:
+    """라인별 폭 측정 + 모바일 줄바꿈 위험 라인 경고 (FR-23).
+
+    Output:
+        ===WIDTH-DIAG-BEGIN===
+        total: 1123 chars, 38 lines
+        max line width: 26 (line 17: '...')
+        lines exceeding 25 width: 2
+          line 17 (w=26): '...'
+          line 23 (w=28): '...'
+        ===WIDTH-DIAG-END===
+    """
+    lines = message.split("\n")
+    widths = [(i + 1, _display_width(ln), ln) for i, ln in enumerate(lines)]
+    if not widths:
+        return
+    max_lineno, max_w, max_line = max(widths, key=lambda x: x[1])
+    over = [(no, w, ln) for no, w, ln in widths if w > MOBILE_LINE_WIDTH_THRESHOLD]
+
+    print("===WIDTH-DIAG-BEGIN===")
+    print(f"total: {len(message)} chars, {len(lines)} lines")
+    print(f"max line width: {max_w} (line {max_lineno})")
+    print(f"  {max_line!r}")
+    print(
+        f"lines exceeding mobile threshold ({MOBILE_LINE_WIDTH_THRESHOLD} wide): {len(over)}"
+    )
+    for no, w, ln in over[:10]:  # 최대 10줄
+        print(f"  line {no} (w={w}): {ln}")
+    if len(over) > 10:
+        print(f"  ... and {len(over) - 10} more")
+    print("===WIDTH-DIAG-END===")
+
+
+# ─────────────────────────────────────────────────────────────
 # orchestration (Phase 1.5)
 # ─────────────────────────────────────────────────────────────
 
 def main() -> int:
     """오케스트레이터 — Phase 1.5: fetch_all → compute_signals → build_v15_message → post_slack.
+
+    Args (sys.argv):
+        --preview: 슬랙 발송 X, 메시지만 stdout 출력 + 폭 진단 (로컬 검증용)
 
     Returns:
         int: 0 = 성공, 1 = 실패 (GitHub Actions에 fail로 전달).
@@ -692,8 +748,11 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
+    preview_mode = "--preview" in sys.argv
+
     try:
-        webhook_url = load_slack_webhook_url()
+        # FR-23 (v6): preview 모드에서는 webhook URL 없어도 OK (발송 안 함)
+        webhook_url = "" if preview_mode else load_slack_webhook_url()
         quotes = fetch_all()                                # data.py
         signals_map = compute_signals(quotes)               # signals.py
 
@@ -704,9 +763,20 @@ def main() -> int:
             news_map = fetch_news_all(stock_quotes)
 
         message = build_v15_message(quotes, signals_map, news_map=news_map)
-        post_slack(webhook_url, message)                    # 기존 그대로
+
+        # FR-23: 메시지 본문 dump (Actions log + 로컬 콘솔용)
+        _print_message_dump(message)
+        _print_width_diagnostics(message)
 
         news_count = len(news_map) if news_map else 0
+        if preview_mode:
+            print(
+                f"[PREVIEW] 슬랙 발송 SKIP "
+                f"({len(quotes)} quotes, {news_count} news, {len(message)} chars)"
+            )
+            return 0
+
+        post_slack(webhook_url, message)                    # 기존 그대로
         print(
             f"[OK] morning-us-index-noai-v2 발송 완료 "
             f"({len(quotes)} quotes, {news_count} news, {len(message)} chars)"
