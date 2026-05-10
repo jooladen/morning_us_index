@@ -56,12 +56,13 @@ def test_message_contains_all_section_headers():
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
 
-    assert "📈 [지수]" in msg
-    assert "🎯 [단타 핵심" in msg or "🎯 [단타" in msg  # 선물 있음 → 섹션 등장
-    assert "🏭 [반도체]" in msg
-    assert "📱 [빅테크]" in msg
-    assert "🚗 [EV/암호]" in msg
-    assert "💰 [거시]" in msg
+    # v7: 섹션 헤더 prefix 이모지 제거 (FR-25)
+    assert "[지수]" in msg
+    assert "[단타 핵심" in msg
+    assert "[반도체]" in msg
+    assert "[빅테크]" in msg
+    assert "[EV/암호]" in msg
+    assert "[거시]" in msg
 
 
 def test_empty_quotes_raises():
@@ -86,7 +87,7 @@ def test_daytrade_candidate_section_appears_when_2_signals():
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
 
-    assert "🚨 [오늘 단타 후보" in msg
+    assert "[오늘 단타 후보" in msg
     assert "INTC" in msg
     assert "갭" in msg
     assert "거래량" in msg
@@ -98,7 +99,7 @@ def test_no_candidate_section_when_no_signals():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    assert "🚨 [오늘 단타 후보" not in msg
+    assert "[오늘 단타 후보" not in msg
 
 
 def test_no_candidate_section_when_only_1_signal():
@@ -111,7 +112,7 @@ def test_no_candidate_section_when_only_1_signal():
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
     # 거래량 신호 1개 < 임계 2 → 후보 섹션 없음
-    assert "🚨 [오늘 단타 후보" not in msg
+    assert "[오늘 단타 후보" not in msg
 
 
 # ─────────────────────────────────────────────────────────────
@@ -140,7 +141,7 @@ def test_volume_spike_emoji_displayed():
 
 
 def test_compact_format_for_no_signal_stock():
-    """v5 압축 형식: 모든 종목이 한 줄 압축, AMD는 신호 없이 단순 라인."""
+    """v7 표 형식: code block 안에 컬럼 정렬. 종목명/ticker/변동률 등장 검증."""
     quotes = [
         _q("AMD", "AMD", "stock", "반도체", last=100.5, prev=100.0),  # +0.5%, 신호 없음
         _q("NVDA", "엔비디아", "stock", "반도체",
@@ -149,14 +150,13 @@ def test_compact_format_for_no_signal_stock():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # AMD 압축 한 줄
     assert "AMD" in msg
     assert "+0.50%" in msg
-    # NVDA 거래량 마크
     assert "🔥" in msg
     assert "엔비디아" in msg
-    # v5 압축 — 한 줄 형식 (• 종목 ticker 가격 변동률 마크)
-    assert "• 엔비디아 NVDA" in msg
+    assert "NVDA" in msg
+    # v7 표 형식 — code block 등장
+    assert "```" in msg
 
 
 # ─────────────────────────────────────────────────────────────
@@ -326,7 +326,7 @@ def test_insider_section_appears_for_significant_buys():
         "TSLA": _ns("TSLA", insider_usd=3_200_000.0),  # $3.2M
     }
     msg = build_v15_message(quotes, sigs, news_map=news_map)
-    assert "💼 [내부자 매수 급증 7일 (≥$1M)]" in msg
+    assert "[내부자 매수 급증 7일 (≥$1M)]" in msg
     assert "+$3.2M" in msg
     assert "+$1.4M" in msg
     # OQ-4: 큰 순 정렬 — TSLA가 NVDA보다 먼저
@@ -401,9 +401,8 @@ def test_daytrade_candidates_sorted_by_signal_count_desc():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # v5: "• 마이크론 MU 🔥..." 형식 (— 없음)
-    # 단타 후보 섹션 안에서 등장 순서 검증
-    candidate_section = msg.split("🚨 [오늘 단타 후보]")[1]
+    # v7: "[오늘 단타 후보]" 섹션 헤더 (이모지 제거)
+    candidate_section = msg.split("[오늘 단타 후보]")[1]
     mu_pos = candidate_section.index("마이크론 MU")
     nvda_pos = candidate_section.index("엔비디아 NVDA")
     assert mu_pos < nvda_pos
@@ -444,7 +443,10 @@ def test_message_dump_and_width_diagnostics(capsys):
 
 
 def test_beginner_footer_appears_at_end():
-    """L1-msg-22 (FR-17): 메시지 끝에 초보자 가이드 푸터 한 줄."""
+    """L1-msg-22 (FR-17/24, v7): 범례를 메시지 상단으로 이동 (시장 동향 라인 다음).
+
+    v7: 푸터 → 상단 범례. 메시지 상단 영역에 등장.
+    """
     quotes = [
         _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
     ]
@@ -454,6 +456,10 @@ def test_beginner_footer_appears_at_end():
     assert "🔥거래량" in msg
     assert "🎯갭" in msg
     assert "★사상최고" in msg
-    # 푸터가 메시지의 마지막 줄 근처
-    last_line = msg.rstrip().split("\n")[-1]
-    assert "💡" in last_line
+    # v7: 범례가 상단 영역 (메시지 시작 ~ 첫 섹션 헤더 사이)
+    first_section_idx = msg.find("[지수]")
+    if first_section_idx == -1:
+        first_section_idx = msg.find("[반도체]")
+    assert first_section_idx > 0, "섹션 헤더가 메시지에 있어야 함"
+    legend_idx = msg.find("💡 신호:")
+    assert 0 < legend_idx < first_section_idx, "범례는 첫 섹션 전에 등장해야 함"

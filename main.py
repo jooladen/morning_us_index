@@ -413,6 +413,72 @@ def _build_table_block(rows: list[list[str]], aligns: list[str] | None = None) -
     return out
 
 
+# ─────────────────────────────────────────────────────────────
+# FR-26 (v7): 표 형식 — code block + 컬럼 정렬
+# 컬럼: [label, ticker, price, "+1.50%", marks/star/badge]
+# ─────────────────────────────────────────────────────────────
+
+def _quote_to_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]:
+    """Quote → 표 row (5 컬럼). v5 압축 형식 유지."""
+    pct = _pct_change(q)
+    # 가격 자릿수 (v5와 동일)
+    if q.last_close >= 100:
+        price_str = f"{q.last_close:,.0f}"
+    elif q.last_close >= 1:
+        price_str = f"{q.last_close:,.1f}"
+    else:
+        price_str = f"{q.last_close:.2f}"
+
+    pct_str = f"{pct:+.2f}%"
+    star = "★" if sig.is_all_time_high else ""
+    marks = sig.emoji_marks
+    badge = ""
+    if news is not None and news.has_earnings_badge:
+        badge = f"📅{news.days_to_earnings}d"
+
+    # VIX 라벨 (FR-20)
+    vix_label = ""
+    if q.ticker == "^VIX":
+        label = _vix_context_label(q)
+        if label:
+            vix_label = f"({label})"
+
+    extras = " ".join(filter(None, [star, marks, badge, vix_label]))
+    return [q.label, q.ticker, price_str, pct_str, extras]
+
+
+def _build_compact_table(rows: list[list[str]]) -> list[str]:
+    """rows를 ```code block``` + 컬럼 자동 폭 정렬.
+
+    Aligns: [left, left, right, left, left]
+    """
+    if not rows:
+        return []
+    aligns = ["left", "left", "right", "left", "left"]
+    n_cols = max(len(r) for r in rows)
+    col_widths = [0] * n_cols
+    for r in rows:
+        for i in range(n_cols):
+            cell = r[i] if i < len(r) else ""
+            w = _display_width(str(cell))
+            if w > col_widths[i]:
+                col_widths[i] = w
+    out = ["```"]
+    for r in rows:
+        parts = []
+        for i in range(n_cols):
+            cell = str(r[i]) if i < len(r) else ""
+            if not cell and i == n_cols - 1:
+                continue  # 마지막 컬럼이 비어있으면 trailing space 제거
+            if aligns[i] == "right":
+                parts.append(_pad_left(cell, col_widths[i]))
+            else:
+                parts.append(_pad_right(cell, col_widths[i]))
+        out.append(" ".join(parts).rstrip())
+    out.append("```")
+    return out
+
+
 def _format_compact_quote(q: Quote, sig: Signal, news: NewsSnapshot | None) -> str:
     """FR-22 (v5): 모바일 한 줄 압축 형식.
 
@@ -496,7 +562,7 @@ def _format_insider_section(
         key=lambda ns: ns.insider_net_buy_usd_7d or 0.0, reverse=True
     )
 
-    lines = ["💼 [내부자 매수 급증 7일 (≥$1M)]"]
+    lines = ["[내부자 매수 급증 7일 (≥$1M)]"]
     for ns in significant:
         label = label_by_ticker.get(ns.ticker, ns.ticker)
         usd = ns.insider_net_buy_usd_7d or 0.0
@@ -573,62 +639,63 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
-    # FR-22 (v5): 모바일 한 줄 압축 — 코드블록 폐기, 종목당 한 줄
+    # FR-24 (v7): 범례를 메시지 상단으로 이동 (사용자 요청 — 푸터는 제거)
+    lines.append(FOOTER_BEGINNER_GUIDE)
+    lines.append("")
 
-    # 📈 [지수]
+    # FR-25 (v7): 섹션 헤더 prefix 이모지 제거 (단타 신호 이모지와 혼동 방지)
+    # FR-26 (v7): 표 형식 부활 — code block + 컬럼 정렬
+
+    # [지수]
     if indices:
-        lines.append("📈 [지수]")
-        for q in indices:
-            sig = signals.get(q.ticker)
-            if sig is None:
-                continue
-            lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
+        lines.append("[지수]")
+        rows = [_quote_to_row(q, signals[q.ticker], _news_map.get(q.ticker))
+                for q in indices if signals.get(q.ticker)]
+        lines.extend(_build_compact_table(rows))
         lines.append("")
 
-    # 🎯 [단타 핵심: 선물 + 시간외]
+    # [단타 핵심: 선물 + 시간외]
     has_ahrs = any(
         signals.get(q.ticker) and signals[q.ticker].is_afterhours_move
         for q in stocks
     )
     if futures or has_ahrs:
-        lines.append("🎯 [단타 핵심: 선물 + 시간외]")
+        lines.append("[단타 핵심: 선물 + 시간외]")
+        rows = []
         for q in futures:
             sig = signals.get(q.ticker)
             if sig is not None:
-                lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
-        # AHRS — 시간외 변동 있는 stocks만 짧은 형식
+                rows.append(_quote_to_row(q, sig, _news_map.get(q.ticker)))
         for q in stocks:
             sig = signals.get(q.ticker)
             if sig is not None and sig.is_afterhours_move and q.afterhours_close and q.last_close:
                 ah_pct = (q.afterhours_close - q.last_close) / q.last_close * 100.0
-                lines.append(f"• AHRS {q.ticker} {ah_pct:+.1f}% 📊")
+                rows.append([f"AHRS {q.ticker}", "", f"{ah_pct:+.1f}%", "📊"])
+        lines.extend(_build_compact_table(rows))
         lines.append("")
 
-    # 섹터별 stocks (반도체, 빅테크, EV/암호)
+    # 섹터별 stocks (반도체, 빅테크, EV/암호) — 헤더 이모지 제거
     sector_groups = [
-        ("🏭 [반도체]", "반도체"),
-        ("📱 [빅테크]", "빅테크"),
-        ("🚗 [EV/암호]", "EV/암호"),
+        ("[반도체]", "반도체"),
+        ("[빅테크]", "빅테크"),
+        ("[EV/암호]", "EV/암호"),
     ]
     for header_label, sector_name in sector_groups:
         sector_stocks = [q for q in stocks if q.sector == sector_name]
         if not sector_stocks:
             continue
         lines.append(header_label)
-        for q in sector_stocks:
-            sig = signals.get(q.ticker)
-            if sig is None:
-                continue
-            lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
+        rows = [_quote_to_row(q, signals[q.ticker], _news_map.get(q.ticker))
+                for q in sector_stocks if signals.get(q.ticker)]
+        lines.extend(_build_compact_table(rows))
         lines.append("")
 
-    # 💰 [거시]
+    # [거시]
     if macros:
-        lines.append("💰 [거시]")
-        for q in macros:
-            sig = signals.get(q.ticker)
-            if sig is not None:
-                lines.append(_format_compact_quote(q, sig, _news_map.get(q.ticker)))
+        lines.append("[거시]")
+        rows = [_quote_to_row(q, signals[q.ticker], _news_map.get(q.ticker))
+                for q in macros if signals.get(q.ticker)]
+        lines.extend(_build_compact_table(rows))
         lines.append("")
 
     # 💼 [내부자 매수 급증 7일 (≥$1M)] — Phase 2-NoAI F3 (Plan FR-05, FR-10)
@@ -646,21 +713,19 @@ def build_v15_message(
     candidates.sort(key=_candidate_sort_key)
 
     if candidates:
-        lines.append("🚨 [오늘 단타 후보]")
+        lines.append("[오늘 단타 후보]")
         for q, sig in candidates:
             # FR-22 (v5): 사유에 이모지 포함이라 종목 라인은 종목명+사유 한 줄로 통합
             reason_str = _format_candidate_reasons(q, sig)
             lines.append(f"• {q.label} {q.ticker} {reason_str}")
-            # 헤드라인 줄바꿈 (F1) — 50자 truncate라 한 줄 또는 두 줄에 들어감
+            # 헤드라인 줄바꿈 (F1) — 50자 truncate
             news = _news_map.get(q.ticker)
             if news is not None and news.top_headline is not None:
                 title, source, compound = news.top_headline
                 lines.append(f"  📰 {compound:+.2f} \"{title}\" ({source})")
         lines.append("")
 
-    # FR-17: 초보자 가이드 푸터 (메시지 끝 1줄)
-    lines.append(FOOTER_BEGINNER_GUIDE)
-
+    # FR-24 (v7): 푸터 제거 (범례는 상단으로 이동)
     msg = "\n".join(lines).rstrip()
     return _compress_if_needed(msg)
 
