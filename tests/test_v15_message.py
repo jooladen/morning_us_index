@@ -142,7 +142,7 @@ def test_volume_spike_emoji_displayed():
 
 
 def test_compact_format_for_no_signal_stock():
-    """v7 표 형식: code block 안에 컬럼 정렬. 종목명/ticker/변동률 등장 검증."""
+    """v9 표 형식: code block + 종목명(한글)/변동률/마크. ticker는 일반 섹션에서 제거됨."""
     quotes = [
         _q("AMD", "AMD", "stock", "반도체", last=100.5, prev=100.0),  # +0.5%, 신호 없음
         _q("NVDA", "엔비디아", "stock", "반도체",
@@ -151,12 +151,11 @@ def test_compact_format_for_no_signal_stock():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    assert "AMD" in msg
     assert "+0.50%" in msg
-    assert "🔥" in msg
+    assert "🔥" in msg  # NVDA 거래량 spike
     assert "엔비디아" in msg
-    assert "NVDA" in msg
-    # v7 표 형식 — code block 등장
+    assert "AMD" in msg  # 한글명 또는 ticker 그대로
+    # v7+ 표 형식 — code block 등장
     assert "```" in msg
 
 
@@ -443,16 +442,20 @@ def test_message_dump_and_width_diagnostics(capsys):
     assert "max line width:" in out
 
 
-def test_no_legend_line_in_v8():
-    """L1-msg-22 (FR-27, v8): 범례 라인 제거 — 종목 옆 마크로 의미 자명.
+def test_legend_appears_at_top_in_v9():
+    """L1-msg-22 (FR-29, v9): 범례 복원 — 💡 prefix 빼고 "신호: ..." 형식.
 
-    사용자 요청 (v8): "신호 앞에 아이콘 제거" → 💡 신호: ... 라인 자체 제거.
+    v8에서 범례 제거 → v9에서 사용자 요청으로 복원 (💡 아이콘만 빠짐).
     """
     quotes = [
         _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # v8: 범례 라인 자체 미등장
-    assert "💡 신호:" not in msg
-    assert "🔥거래량" not in msg  # 푸터/범례 문자열은 없음
+    # v9: 범례 등장, 💡 prefix 없음
+    assert "신호: 🔥거래량" in msg
+    assert "💡 신호:" not in msg  # 💡 prefix 제거 검증
+    # 범례가 첫 섹션 헤더 전 (상단 영역)
+    legend_idx = msg.find("신호: 🔥거래량")
+    first_section_idx = msg.find("[반도체]")
+    assert 0 < legend_idx < first_section_idx

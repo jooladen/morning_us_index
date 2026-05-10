@@ -419,9 +419,12 @@ def _build_table_block(rows: list[list[str]], aligns: list[str] | None = None) -
 # ─────────────────────────────────────────────────────────────
 
 def _quote_to_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]:
-    """Quote → 표 row (5 컬럼). v5 압축 형식 유지."""
+    """Quote → 표 row (4 컬럼, ticker 제외).
+
+    FR-30 (v9): ticker 컬럼 제거 — 모바일 한 줄 폭 단축 (22 → 15폭).
+    컬럼: [label, price, pct, extras]
+    """
     pct = _pct_change(q)
-    # 가격 자릿수 (v5와 동일)
     if q.last_close >= 100:
         price_str = f"{q.last_close:,.0f}"
     elif q.last_close >= 1:
@@ -436,7 +439,6 @@ def _quote_to_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]
     if news is not None and news.has_earnings_badge:
         badge = f"📅{news.days_to_earnings}d"
 
-    # VIX 라벨 (FR-20)
     vix_label = ""
     if q.ticker == "^VIX":
         label = _vix_context_label(q)
@@ -444,18 +446,18 @@ def _quote_to_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]
             vix_label = f"({label})"
 
     extras = " ".join(filter(None, [star, marks, badge, vix_label]))
-    return [q.label, q.ticker, price_str, pct_str, extras]
+    return [q.label, price_str, pct_str, extras]
 
 
 def _build_compact_table(rows: list[list[str]]) -> list[str]:
-    """rows를 ```code block``` + 컬럼 자동 폭 정렬 + row 사이 구분선.
+    """rows를 ```code block``` + 컬럼 자동 폭 정렬.
 
-    Aligns: [left, left, right, left, left]
-    FR-28 (v8): 각 종목 라인 사이에 ─ 구분선 (마지막 종목 뒤는 X).
+    FR-31 (v9): row 사이 구분선 제거 — 모바일에서 자동 줄바꿈으로 어수선.
+    Aligns: [left, right, left, left] (4 컬럼: label, price, pct, extras)
     """
     if not rows:
         return []
-    aligns = ["left", "left", "right", "left", "left"]
+    aligns = ["left", "right", "left", "left"]
     n_cols = max(len(r) for r in rows)
     col_widths = [0] * n_cols
     for r in rows:
@@ -465,29 +467,19 @@ def _build_compact_table(rows: list[list[str]]) -> list[str]:
             if w > col_widths[i]:
                 col_widths[i] = w
 
-    # 컬럼 폭 합계 (구분선 길이용) — col_widths + 컬럼 간 공백 1자
-    total_width = sum(col_widths) + max(0, n_cols - 1)
-    separator = "─" * total_width
-
     out = ["```"]
-    formatted_rows: list[str] = []
     for r in rows:
         parts = []
         for i in range(n_cols):
             cell = str(r[i]) if i < len(r) else ""
             if not cell and i == n_cols - 1:
                 continue  # 마지막 컬럼이 비어있으면 trailing space 제거
-            if aligns[i] == "right":
+            align = aligns[i] if i < len(aligns) else "left"
+            if align == "right":
                 parts.append(_pad_left(cell, col_widths[i]))
             else:
                 parts.append(_pad_right(cell, col_widths[i]))
-        formatted_rows.append(" ".join(parts).rstrip())
-
-    # row 사이 구분선 삽입
-    for i, row_line in enumerate(formatted_rows):
-        out.append(row_line)
-        if i < len(formatted_rows) - 1:
-            out.append(separator)
+        out.append(" ".join(parts).rstrip())
     out.append("```")
     return out
 
@@ -652,7 +644,9 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
-    # FR-27 (v8): 범례 라인 제거 — 종목 옆 마크 + 단타 후보 사유로 의미 자명
+    # FR-29 (v9): 범례 라인 복원 — 💡 prefix는 제거 (사용자 요청)
+    lines.append(FOOTER_BEGINNER_GUIDE)
+    lines.append("")
 
     # [지수]
     if indices:
@@ -678,6 +672,7 @@ def build_v15_message(
             sig = signals.get(q.ticker)
             if sig is not None and sig.is_afterhours_move and q.afterhours_close and q.last_close:
                 ah_pct = (q.afterhours_close - q.last_close) / q.last_close * 100.0
+                # v9: 4 컬럼 (label, price='', pct, extras)
                 rows.append([f"AHRS {q.ticker}", "", f"{ah_pct:+.1f}%", "📊"])
         lines.extend(_build_compact_table(rows))
         lines.append("")

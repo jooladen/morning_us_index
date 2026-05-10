@@ -165,9 +165,9 @@ COMPANY_NAMES_EN: dict[str, list[str]] = {
 VIX_LABEL_STABLE_MAX: float = 20.0
 VIX_LABEL_CAUTION_MAX: float = 25.0
 
-# FR-17: 초보자 가이드 푸터 (메시지 끝 1줄)
+# FR-17/29: 신호 범례 (v9 — 💡 prefix 제거)
 FOOTER_BEGINNER_GUIDE: str = (
-    "💡 신호: 🔥거래량 🎯갭 🆙신고가 📊시간외 ⚡VIX급등 ★사상최고"
+    "신호: 🔥거래량 🎯갭 🆙신고가 📊시간외 ⚡VIX급등 ★사상최고"
 )
 
 
