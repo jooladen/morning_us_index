@@ -1,0 +1,211 @@
+# Design Ref: §8.3 — build_v15_message 통합 테스트
+"""Phase 1.5 메시지 빌더 테스트.
+
+build_v15_message + _format_v15_quote_line + _format_compact_line + _compress_if_needed.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+import config
+from data import Quote
+from main import build_v15_message
+from signals import compute_signals
+
+
+def _q(
+    ticker: str,
+    label: str,
+    category: str,
+    sector: str | None = None,
+    last: float = 100.0,
+    prev: float = 100.0,
+    last_date_: date = date(2026, 5, 8),
+    is_stale: bool = False,
+    **kw,
+) -> Quote:
+    return Quote(
+        ticker=ticker,
+        label=label,
+        category=category,  # type: ignore[arg-type]
+        sector=sector,
+        last_close=last,
+        prev_close=prev,
+        last_date=last_date_,
+        is_stale=is_stale,
+        **kw,
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# 기본 메시지 구조
+# ─────────────────────────────────────────────────────────────
+
+def test_message_contains_all_section_headers():
+    quotes = [
+        _q("^IXIC", "나스닥", "index", last=26000, prev=25000),
+        _q("ES=F", "S&P 미니", "future", last=7000, prev=6990),
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+        _q("AAPL", "애플", "stock", "빅테크", last=232, prev=230),
+        _q("TSLA", "테슬라", "stock", "EV/암호", last=312, prev=300),
+        _q("USDKRW=X", "원/달러", "macro", last=1375, prev=1380),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+
+    assert "📈 [지수]" in msg
+    assert "🎯 [단타 핵심" in msg or "🎯 [단타" in msg  # 선물 있음 → 섹션 등장
+    assert "🏭 [반도체]" in msg
+    assert "📱 [빅테크]" in msg
+    assert "🚗 [EV/암호]" in msg
+    assert "💰 [거시]" in msg
+
+
+def test_empty_quotes_raises():
+    with pytest.raises(RuntimeError, match="비어있"):
+        build_v15_message([], {})
+
+
+# ─────────────────────────────────────────────────────────────
+# 단타 후보 자동 요약
+# ─────────────────────────────────────────────────────────────
+
+def test_daytrade_candidate_section_appears_when_2_signals():
+    """INTC: 갭 + 거래량 = 2 signals → 단타 후보."""
+    quotes = [
+        _q("INTC", "인텔", "stock", "반도체",
+           last=32.15, prev=28.20,
+           open_today=31.59,  # +12% 갭
+           volume_today=8_000_000,
+           volume_avg_20d=1_000_000,
+           high_52w=33.00),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+
+    assert "🚨 [오늘 단타 후보" in msg
+    assert "INTC" in msg
+    assert "갭" in msg
+    assert "거래량" in msg
+
+
+def test_no_candidate_section_when_no_signals():
+    quotes = [
+        _q("AMD", "AMD", "stock", "반도체", last=100.0, prev=99.5),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "🚨 [오늘 단타 후보" not in msg
+
+
+def test_no_candidate_section_when_only_1_signal():
+    """신호 1개만 있으면 후보 섹션 X."""
+    quotes = [
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),  # 거래량만
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    # 거래량 신호 1개 < 임계 2 → 후보 섹션 없음
+    assert "🚨 [오늘 단타 후보" not in msg
+
+
+# ─────────────────────────────────────────────────────────────
+# 사상최고 ★ / 신호 마크 표시
+# ─────────────────────────────────────────────────────────────
+
+def test_all_time_high_star_displayed():
+    quotes = [
+        _q("MU", "마이크론", "stock", "반도체",
+           last=100.0, prev=95.0, high_52w=100.0),  # ratio = 1.0 → ★
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "★" in msg
+
+
+def test_volume_spike_emoji_displayed():
+    quotes = [
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "🔥" in msg
+
+
+def test_compact_format_for_no_signal_stock():
+    quotes = [
+        _q("AMD", "AMD", "stock", "반도체", last=100.5, prev=100.0),  # +0.5%, 신호 없음
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142, prev=140,
+           volume_today=2_500_000, volume_avg_20d=1_000_000),  # 거래량 spike
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    # AMD는 압축 1줄 ("• AMD: +0.50%")
+    assert "AMD: +0.50%" in msg
+    # NVDA는 풀 표시 (이모지 + 마크)
+    assert "🔥" in msg
+    assert "엔비디아 NVDA" in msg
+
+
+# ─────────────────────────────────────────────────────────────
+# 길이 한도 (NFR-01)
+# ─────────────────────────────────────────────────────────────
+
+def test_message_within_4000_chars_full_quotes():
+    """26 quotes 모두 시뮬레이션 → 4000자 이내."""
+    quotes: list[Quote] = []
+    for ticker, label in config.INDICES:
+        quotes.append(_q(ticker, label, "index", last=1000.0, prev=999.0))
+    for ticker, label in config.FUTURES:
+        quotes.append(_q(ticker, label, "future", last=1000.0, prev=999.0))
+    for ticker, label in config.STOCKS:
+        sec = config.SECTOR_MAP.get(ticker)
+        quotes.append(_q(ticker, label, "stock", sec, last=100.0, prev=99.0))
+    for ticker, label, _u in config.MACRO:
+        quotes.append(_q(ticker, label, "macro", last=1000.0, prev=999.0))
+
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert len(msg) <= config.SLACK_MESSAGE_MAX_CHARS
+
+
+# ─────────────────────────────────────────────────────────────
+# 휴장일
+# ─────────────────────────────────────────────────────────────
+
+def test_stale_handling_in_v15():
+    quotes = [
+        _q("^IXIC", "나스닥", "index",
+           last=26000.0, prev=25000.0,
+           last_date_=date(2026, 5, 9), is_stale=True),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "(미 증시 휴장 / 마지막 거래일)" in msg
+    assert "직전 거래일: 2026-05-09" in msg
+
+
+# ─────────────────────────────────────────────────────────────
+# 시간외 섹션
+# ─────────────────────────────────────────────────────────────
+
+def test_afterhours_section_appears_when_data_present():
+    """AHRS 변동 1%+ 종목은 단타 핵심 섹션에 등장."""
+    quotes = [
+        _q("ES=F", "S&P 미니", "future", last=7000, prev=6990),
+        _q("NVDA", "엔비디아", "stock", "반도체",
+           last=142.0, prev=140.0,
+           afterhours_close=144.5),  # +1.76%
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    assert "AHRS NVDA" in msg
+    assert "📊" in msg
