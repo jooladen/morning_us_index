@@ -442,20 +442,26 @@ def test_message_dump_and_width_diagnostics(capsys):
     assert "max line width:" in out
 
 
-def test_legend_appears_at_top_in_v9():
-    """L1-msg-22 (FR-29, v9): 범례 복원 — 💡 prefix 빼고 "신호: ..." 형식.
+def test_legend_section_in_v10():
+    """L1-msg-22 (FR-32, v10): 신호 섹션 — 다른 섹션처럼 [신호] + code block + 항목당 한 줄.
 
-    v8에서 범례 제거 → v9에서 사용자 요청으로 복원 (💡 아이콘만 빠짐).
+    v8→v9에서 단일 라인 복원했다가, v10에서 다른 섹션처럼 표 형식으로 변경.
     """
     quotes = [
         _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # v9: 범례 등장, 💡 prefix 없음
-    assert "신호: 🔥거래량" in msg
-    assert "💡 신호:" not in msg  # 💡 prefix 제거 검증
-    # 범례가 첫 섹션 헤더 전 (상단 영역)
-    legend_idx = msg.find("신호: 🔥거래량")
+    # v10: [신호] 섹션 헤더 + code block 안에 항목당 한 줄
+    assert "[신호]" in msg
+    assert "🔥 거래량" in msg
+    assert "🎯 갭" in msg
+    assert "🆙 신고가" in msg
+    assert "📊 시간외" in msg
+    assert "⚡ VIX 급등" in msg
+    assert "★" in msg
+    assert "사상최고" in msg
+    # 신호 섹션이 첫 종목 섹션 전
+    signal_idx = msg.find("[신호]")
     first_section_idx = msg.find("[반도체]")
-    assert 0 < legend_idx < first_section_idx
+    assert 0 < signal_idx < first_section_idx

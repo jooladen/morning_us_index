@@ -25,6 +25,7 @@ from config import (
     HTTP_READ_TIMEOUT_SEC,
     RETRY_ATTEMPTS,
     RETRY_BACKOFF_SEC,
+    SIGNAL_LEGEND_ROWS,
     SLACK_MESSAGE_MAX_CHARS,
     STALE_THRESHOLD_DAYS,
     TICKERS,
@@ -450,15 +451,20 @@ def _quote_to_row(q: Quote, sig: Signal, news: NewsSnapshot | None) -> list[str]
 
 
 def _build_compact_table(rows: list[list[str]]) -> list[str]:
-    """rows를 ```code block``` + 컬럼 자동 폭 정렬.
+    """rows를 ```code block``` + 컬럼 자동 폭 정렬 + row 사이 빈 줄.
 
-    FR-31 (v9): row 사이 구분선 제거 — 모바일에서 자동 줄바꿈으로 어수선.
-    Aligns: [left, right, left, left] (4 컬럼: label, price, pct, extras)
+    FR-33 (v10): row 사이 newline 추가 — 구분선(─) 대신 시각적 분리.
+    Aligns: 기본 [left, right, left, left] (4 컬럼). 컬럼 수 다르면 모두 left.
     """
     if not rows:
         return []
-    aligns = ["left", "right", "left", "left"]
     n_cols = max(len(r) for r in rows)
+    # n_cols=4 (종목 표)일 때만 가격 컬럼 right align, 그 외엔 모두 left
+    if n_cols == 4:
+        aligns = ["left", "right", "left", "left"]
+    else:
+        aligns = ["left"] * n_cols
+
     col_widths = [0] * n_cols
     for r in rows:
         for i in range(n_cols):
@@ -467,7 +473,7 @@ def _build_compact_table(rows: list[list[str]]) -> list[str]:
             if w > col_widths[i]:
                 col_widths[i] = w
 
-    out = ["```"]
+    formatted_rows: list[str] = []
     for r in rows:
         parts = []
         for i in range(n_cols):
@@ -479,7 +485,14 @@ def _build_compact_table(rows: list[list[str]]) -> list[str]:
                 parts.append(_pad_left(cell, col_widths[i]))
             else:
                 parts.append(_pad_right(cell, col_widths[i]))
-        out.append(" ".join(parts).rstrip())
+        formatted_rows.append(" ".join(parts).rstrip())
+
+    # FR-33: row 사이 빈 줄 삽입 (마지막 row 뒤는 X)
+    out = ["```"]
+    for i, row_line in enumerate(formatted_rows):
+        out.append(row_line)
+        if i < len(formatted_rows) - 1:
+            out.append("")
     out.append("```")
     return out
 
@@ -644,8 +657,10 @@ def build_v15_message(
     stocks = [q for q in quotes if q.category == "stock"]
     macros = [q for q in quotes if q.category == "macro"]
 
-    # FR-29 (v9): 범례 라인 복원 — 💡 prefix는 제거 (사용자 요청)
-    lines.append(FOOTER_BEGINNER_GUIDE)
+    # FR-32 (v10): 신호 섹션을 다른 섹션처럼 [신호] + code block + 항목당 한 줄
+    lines.append("[신호]")
+    legend_rows = [[icon, label] for icon, label in SIGNAL_LEGEND_ROWS]
+    lines.extend(_build_compact_table(legend_rows))
     lines.append("")
 
     # [지수]
