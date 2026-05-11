@@ -225,3 +225,72 @@ def test_l1_4_fetch_indices_real_yfinance():
         assert q.last_close > 0
         assert q.prev_close > 0
         assert q.ticker in {t for t, _ in config.TICKERS}
+
+
+# ─────────────────────────────────────────────────────────────
+# L1-td-1 ~ L1-td-3 — trading-date-fix
+# Design Ref: docs/02-design/features/trading-date-fix.design.md §8.2
+# Plan SC-TD-1/2/3 충족 가드.
+# ─────────────────────────────────────────────────────────────
+
+from data import Quote  # noqa: E402  — trading-date-fix helper용
+from main import _resolve_last_trading_date  # noqa: E402
+
+
+def _td_quote(
+    category: str,
+    last_date_: date,
+    is_stale: bool,
+) -> Quote:
+    """trading-date-fix 테스트 전용 Quote factory.
+
+    last_close/prev_close 등은 helper가 안 보므로 더미 값으로 충분.
+    """
+    return Quote(
+        ticker="DUMMY",
+        label="dummy",
+        category=category,  # type: ignore[arg-type]
+        sector=None,
+        last_close=100.0,
+        prev_close=100.0,
+        last_date=last_date_,
+        is_stale=is_stale,
+    )
+
+
+def test_resolve_last_trading_date_all_fresh():
+    """L1-td-1: 정상 거래일 — 모든 자산 fresh, 같은 last_date."""
+    quotes = [
+        _td_quote("index",  date(2026, 5, 8), is_stale=False),
+        _td_quote("stock",  date(2026, 5, 8), is_stale=False),
+        _td_quote("future", date(2026, 5, 8), is_stale=False),
+        _td_quote("macro",  date(2026, 5, 8), is_stale=False),
+    ]
+    assert _resolve_last_trading_date(quotes) == date(2026, 5, 8)
+
+
+def test_resolve_last_trading_date_weekend_mixed():
+    """L1-td-2: 주말 혼합 — index/stock stale, future/macro fresh (today).
+
+    버그 시나리오 직접 재현: max(전체)는 5/11이지만 helper는 5/8 반환해야 함.
+    """
+    quotes = [
+        _td_quote("index",  date(2026, 5, 8),  is_stale=True),
+        _td_quote("stock",  date(2026, 5, 8),  is_stale=True),
+        _td_quote("future", date(2026, 5, 11), is_stale=False),
+        _td_quote("macro",  date(2026, 5, 11), is_stale=False),
+    ]
+    # 본 시장 자산만으로 max = 5/8. 전체 max(5/11)와 명확히 구분되어야 함.
+    assert _resolve_last_trading_date(quotes) == date(2026, 5, 8)
+    assert max(q.last_date for q in quotes) == date(2026, 5, 11)
+
+
+def test_resolve_last_trading_date_all_stale():
+    """L1-td-3: 모두 stale (미국 정부 공휴일 등 드문 케이스)."""
+    quotes = [
+        _td_quote("index",  date(2026, 5, 7), is_stale=True),
+        _td_quote("stock",  date(2026, 5, 7), is_stale=True),
+        _td_quote("future", date(2026, 5, 7), is_stale=True),
+        _td_quote("macro",  date(2026, 5, 7), is_stale=True),
+    ]
+    assert _resolve_last_trading_date(quotes) == date(2026, 5, 7)

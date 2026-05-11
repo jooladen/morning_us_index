@@ -30,6 +30,7 @@ from config import (
     STALE_THRESHOLD_DAYS,
     TICKERS,
     TIMEZONE_KST,
+    TRADING_DAY_CATEGORIES,
     VIX_LABEL_CAUTION_MAX,
     VIX_LABEL_STABLE_MAX,
     YFINANCE_PERIOD,
@@ -146,6 +147,10 @@ def build_message(
 
     now_kst = datetime.now(ZoneInfo(TIMEZONE_KST))
     header_date = now_kst.strftime("%Y-%m-%d")
+    # Phase 1 build_message는 IndexQuote(5개 지수, 모두 index 카테고리)만 받음.
+    # trading-date-fix helper는 Quote(category 필드 있음) 전용 — Phase 1.5
+    # build_v15_message에서만 사용. Phase 1은 본 시장 자산만 받아 모순 표시
+    # 발생 불가 → 단순 max로 충분.
     last_trading_date = max(q.last_date for q in quotes)
     any_stale = any(q.is_stale for q in quotes)
 
@@ -602,6 +607,30 @@ def _format_daytrade_headline(news: NewsSnapshot | None) -> str | None:
     return f"  └ 📰 {compound:+.2f} \"{title}\" ({source})"
 
 
+# Design Ref §4.2.1 — trading-date-fix helper.
+def _resolve_last_trading_date(quotes: list[Quote]) -> date:
+    """본 시장 캘린더 기준 last_trading_date 계산.
+
+    Plan SC-TD-1: 헤더 "직전 거래일" 모순 표시 해소.
+
+    24-7 가까이 거래되는 future/macro 자산은 today 마킹 가능 → 휴장일
+    "직전 거래일: today (미 증시 휴장)" 인지 부조화 발생. 본 시장 캘린더와
+    동기화된 자산(TRADING_DAY_CATEGORIES = ('index', 'stock'))만 max로
+    집계해 정확한 마지막 본 시장 거래일 반환.
+
+    Args:
+        quotes: fetch_all()이 반환한 Quote 리스트.
+
+    Returns:
+        본 시장 자산 last_date의 max. trading_assets가 비어 있으면
+        fallback으로 전체 quotes의 max 반환 (운영에선 발생 X, 안전망).
+    """
+    trading_assets = [q for q in quotes if q.category in TRADING_DAY_CATEGORIES]
+    if trading_assets:
+        return max(q.last_date for q in trading_assets)
+    return max(q.last_date for q in quotes)
+
+
 def build_v15_message(
     quotes: list[Quote],
     signals: dict[str, Signal],
@@ -632,7 +661,8 @@ def build_v15_message(
 
     now_kst = datetime.now(ZoneInfo(TIMEZONE_KST))
     header_date = now_kst.strftime("%Y-%m-%d")
-    last_trading_date = max(q.last_date for q in quotes)
+    # Design Ref §4.2.2/4.2.3 — trading-date-fix: 본 시장 캘린더 기준 계산.
+    last_trading_date = _resolve_last_trading_date(quotes)
     any_stale = any(q.is_stale for q in quotes)
 
     # FR-21 (v4): 헤더 2줄 분리 — 모바일 한 줄 잘림 방지

@@ -27,6 +27,13 @@ RETRY_BACKOFF_SEC: list[int] = [30, 60, 120]
 
 STALE_THRESHOLD_DAYS = 2
 
+# trading-date-fix: 본 시장(미국 정규장) 캘린더와 일치하는 자산 카테고리.
+# Quote.category Literal["index", "future", "stock", "macro"] 중,
+# index(나스닥/S&P/다우/VIX) + stock(NVDA/MU 등)은 본 시장 캘린더와 동일.
+# future(야간선물) + macro(forex)는 24-5 거래 → today 마킹 가능 → 제외.
+# 새 카테고리 추가 시 본 튜플 + Quote.category Literal 둘 다 갱신할 것.
+TRADING_DAY_CATEGORIES: tuple[str, ...] = ("index", "stock")
+
 
 # ─────────────────────────────────────────────────────────────
 # Phase 1.5 (v15) — Design Ref: §4.1
