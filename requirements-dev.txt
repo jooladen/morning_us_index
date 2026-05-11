@@ -1,0 +1,7 @@
+# Dev/tooling dependencies — NOT required for production main.py.
+# Design Ref: §2.3, §4.1, §14 — scripts/preview_mobile.py (slack-mobile-preview).
+# Plan SC-MP-4: 2 packages (playwright + jinja2), isolated from main requirements.txt.
+
+# Slack mobile preview tool (Galaxy S23+ HTML mock + screenshot)
+playwright>=1.49.0
+jinja2>=3.1.0

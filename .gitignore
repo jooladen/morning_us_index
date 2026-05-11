@@ -33,3 +33,10 @@ htmlcov/
 
 # bkit plugin local state (per-machine)
 .bkit/
+
+# Claude Code local config (per-machine — settings.local.json + agent-memory)
+.claude/
+
+# slack-mobile-preview tool output (Design Ref §11.1, §14)
+scripts/output/
+scripts/output/*.png

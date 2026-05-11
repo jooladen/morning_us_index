@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slack Mobile Preview ({{ timestamp }})</title>
+  <!--
+    Design Ref §4.2 — Galaxy S23+ font stack.
+    Plan FR-03: Noto Sans KR (한글) + Roboto (영문) + Noto Color Emoji (이모지) + Roboto Mono (code).
+    Samsung One UI는 시스템 폰트라 웹폰트 X — Noto Sans KR가 사실상 동등.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&family=Noto+Color+Emoji&family=Roboto:wght@400;700&family=Roboto+Mono&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f4f4f4;
+      /* Slack Android: body 약 15-16px. Noto Color Emoji는 fallback. */
+      font-family: 'Noto Sans KR', 'Roboto', 'Noto Color Emoji', sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+      color: #1d1c1d;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .slack-channel {
+      background: #fff;
+      padding: 12px 14px;
+      min-height: 100vh;
+    }
+    .channel-header {
+      font-size: 13px;
+      color: #616061;
+      border-bottom: 1px solid #e1e1e1;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .message {
+      /* Slack mobile: preserves whitespace + wraps long words. */
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    pre.code-block {
+      background: #f8f8f8;
+      border: 1px solid #e1e1e1;
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin: 6px 0;
+      font-family: 'Roboto Mono', 'Courier New', monospace;
+      font-size: 13px;
+      /* Slack code block: monospace, but Korean falls back to proportional. */
+      white-space: pre;
+      overflow-x: auto;
+    }
+    code.inline-code {
+      background: #f8f8f8;
+      border: 1px solid #e1e1e1;
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-family: 'Roboto Mono', monospace;
+      font-size: 13px;
+    }
+    strong { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="slack-channel">
+    <div class="channel-header"># 미증시지수 ▾</div>
+    <div class="message">{{ content|safe }}</div>
+  </div>
+</body>
+</html>
