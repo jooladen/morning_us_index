@@ -172,10 +172,15 @@ def fetch_message_from_actions_log(run_id: str) -> str:
     own. So we locate the marker lines first, slice the body, then strip
     prefixes line-by-line.
     """
+    # Force UTF-8 decode — gh log contains Korean text + emoji; Windows
+    # default cp949 raises UnicodeDecodeError and silently yields stdout=None.
+    # Plan NFR-05 (cross-OS compat) — this keeps Win/mac/Linux uniform.
     result = subprocess.run(
         ["gh", "run", "view", run_id, "--log"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     lines = result.stdout.splitlines()
