@@ -420,15 +420,15 @@ def test_market_mood_line_includes_fear_greed_link():
     # mrkdwn 형식 `<URL|텍스트>` 그대로 메시지에 포함되어야 슬랙이 링크로 렌더
     assert FEAR_GREED_URL in msg
     assert "<" + FEAR_GREED_URL + "|" in msg
-    assert "🐂🐻 시장심리" in msg
+    assert "🐂🐻 CNN 탐욕 지수" in msg
     # mood line 같은 줄에 붙어 있음 (개행 없이 ' · ' separator)
     assert "(안정) · <" in msg
 
 
-def test_market_mood_line_includes_learning_guide_link():
-    """L1-msg-lg-1 (learning-guide-link): mood line에 GitHub 학습 자료 mrkdwn 링크 포함.
+def test_market_mood_line_learning_guide_in_footer_only():
+    """L1-msg-lg-1 (learning-guide-link): GitHub 학습 자료 링크는 푸터에만 존재.
 
-    헤더 한 줄 안에 시장심리(CNN) + 매수타이밍(GitHub) 두 mrkdwn 링크 묶음.
+    헤더 mood line에서 매수타이밍 링크 제거됨 — 푸터 plain URL에만 포함.
     """
     from config import LEARNING_GUIDE_URL
     quotes = [
@@ -436,13 +436,11 @@ def test_market_mood_line_includes_learning_guide_link():
         _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
     ]
     msg = build_v15_message(quotes, compute_signals(quotes))
+    # 푸터에는 plain URL로 존재
     assert LEARNING_GUIDE_URL in msg
-    assert "<" + LEARNING_GUIDE_URL + "|" in msg
-    assert "📖 매수타이밍" in msg
-    # 헤더 mood line 안에 시장심리 다음에 매수타이밍 (순서 보장)
-    fg_idx = msg.find("🐂🐻 시장심리")
-    lg_idx = msg.find("📖 매수타이밍")
-    assert 0 < fg_idx < lg_idx
+    # 헤더 mood line에는 mrkdwn 링크 형태로 없음
+    assert "<" + LEARNING_GUIDE_URL + "|" not in msg
+    assert "📖 매수타이밍" not in msg
 
 
 def test_links_footer_contains_plain_urls():

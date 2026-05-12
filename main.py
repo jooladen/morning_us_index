@@ -286,13 +286,9 @@ def _vix_context_label(vix_quote: Quote | None) -> str:
 
 
 def _format_market_mood_line(quotes: list[Quote]) -> str:
-    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨 + 시장심리/매수타이밍 링크.
+    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨 + CNN 탐욕 지수 링크.
 
-    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정) · 🐂🐻 시장심리 · 📖 매수타이밍``.
-
-    learning-guide-link: mrkdwn 링크 2개 — CNN F&G 페이지 + GitHub 학습 자료.
-    slack 앱에서는 텍스트만 보이고 클릭 가능. raw 환경 대응은 메시지 끝
-    plain URL 푸터(_format_links_footer)가 백업.
+    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정) · 🐂🐻 CNN 탐욕 지수``.
     """
     stock_pcts = [_pct_change(q) for q in quotes if q.category == "stock"]
     up_count = sum(1 for p in stock_pcts if p > 0)
@@ -308,11 +304,10 @@ def _format_market_mood_line(quotes: list[Quote]) -> str:
     else:
         vix_text = "VIX N/A"
 
-    sentiment_link = f"<{FEAR_GREED_URL}|🐂🐻 시장심리>"
-    guide_link = f"<{LEARNING_GUIDE_URL}|📖 매수타이밍>"
+    sentiment_link = f"<{FEAR_GREED_URL}|🐂🐻 CNN 탐욕 지수>"
     return (
         f"📊 상승 {up_count} / 하락 {down_count} / {vix_text} "
-        f"· {sentiment_link} · {guide_link}"
+        f"· {sentiment_link}"
     )
 
 
