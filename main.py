@@ -776,6 +776,8 @@ def build_v15_message(
     # FR-16: 신호 수 내림차순, 변동률 절댓값 내림차순으로 정렬 (강한 신호 먼저)
     candidates.sort(key=_candidate_sort_key)
 
+    # daytrade-candidate-zero-notice: 자격 충족 stock 0개일 때도 섹션 안내
+    # 표시 → 사용자 인지 부조화(데이터 누락? vs 진짜 0?) 해소.
     if candidates:
         lines.append("[오늘 단타 후보]")
         for q, sig in candidates:
@@ -787,6 +789,12 @@ def build_v15_message(
             if news is not None and news.top_headline is not None:
                 title, source, compound = news.top_headline
                 lines.append(f"  📰 {compound:+.2f} \"{title}\" ({source})")
+        lines.append("")
+    else:
+        lines.append("[오늘 단타 후보]")
+        lines.append(
+            f"오늘은 신호 {DAYTRADE_CANDIDATE_MIN_SIGNALS}개 이상 충족 종목 없음"
+        )
         lines.append("")
 
     # learning-guide-link: raw 환경(이메일 알림/외부 통합/시뮬 등에서

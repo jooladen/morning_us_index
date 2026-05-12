@@ -94,17 +94,26 @@ def test_daytrade_candidate_section_appears_when_2_signals():
     assert "🔥" in msg  # 거래량
 
 
-def test_no_candidate_section_when_no_signals():
+def test_candidate_section_shows_zero_notice_when_no_signals():
+    """daytrade-candidate-zero-notice: 신호 0이라도 섹션 + 안내 라인 등장.
+
+    이전: 후보 0개면 섹션 자체 미표시 → 사용자 인지 부조화 (데이터 누락 vs 진짜 0).
+    현재: '[오늘 단타 후보]' 헤더 + '오늘은 신호 N개 이상 충족 종목 없음' 안내.
+    """
     quotes = [
         _q("AMD", "AMD", "stock", "반도체", last=100.0, prev=99.5),
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    assert "[오늘 단타 후보" not in msg
+    # 섹션 헤더 등장 + 안내 라인 등장
+    assert "[오늘 단타 후보]" in msg
+    assert "오늘은 신호 2개 이상 충족 종목 없음" in msg
+    # 실 종목 라인은 없음 (• AMD 같은 형식)
+    assert "• AMD" not in msg
 
 
-def test_no_candidate_section_when_only_1_signal():
-    """신호 1개만 있으면 후보 섹션 X."""
+def test_candidate_section_shows_zero_notice_when_only_1_signal():
+    """daytrade-candidate-zero-notice: 신호 1개 < 임계(2) → 안내 라인."""
     quotes = [
         _q("NVDA", "엔비디아", "stock", "반도체",
            last=142, prev=140,
@@ -112,8 +121,10 @@ def test_no_candidate_section_when_only_1_signal():
     ]
     sigs = compute_signals(quotes)
     msg = build_v15_message(quotes, sigs)
-    # 거래량 신호 1개 < 임계 2 → 후보 섹션 없음
-    assert "[오늘 단타 후보" not in msg
+    assert "[오늘 단타 후보]" in msg
+    assert "오늘은 신호 2개 이상 충족 종목 없음" in msg
+    # NVDA가 실 종목 라인으로 등장하지 않음 (단타 후보 영역에서)
+    assert "• 엔비디아 NVDA" not in msg
 
 
 def test_daytrade_candidate_excludes_non_stock_categories():
@@ -135,9 +146,12 @@ def test_daytrade_candidate_excludes_non_stock_categories():
     # mood line(헤더)엔 VIX 정보 정상 표시
     msg = build_v15_message(quotes, sigs)
     assert "VIX 18.38" in msg
-    # 단타 후보 섹션엔 절대 등장 X
-    assert "[오늘 단타 후보" not in msg
-    assert "VIX ^VIX" not in msg
+    # 단타 후보 섹션 헤더는 등장 (daytrade-candidate-zero-notice) — 단,
+    # VIX는 실 종목 라인('• VIX ^VIX')으로 등장하면 안 됨 (stock 필터)
+    assert "[오늘 단타 후보]" in msg
+    assert "• VIX ^VIX" not in msg
+    # 0개 안내 라인 등장
+    assert "오늘은 신호 2개 이상 충족 종목 없음" in msg
 
 
 # ─────────────────────────────────────────────────────────────
