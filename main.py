@@ -22,6 +22,7 @@ from config import (
     DAYTRADE_CANDIDATE_MIN_SIGNALS,
     FEAR_GREED_URL,
     FOOTER_BEGINNER_GUIDE,
+    LEARNING_GUIDE_URL,
     HTTP_CONNECT_TIMEOUT_SEC,
     HTTP_READ_TIMEOUT_SEC,
     RETRY_ATTEMPTS,
@@ -283,12 +284,13 @@ def _vix_context_label(vix_quote: Quote | None) -> str:
 
 
 def _format_market_mood_line(quotes: list[Quote]) -> str:
-    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨 + Fear & Greed 링크.
+    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨 + 시장심리/매수타이밍 링크.
 
-    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정) · <URL|🐂🐻 시장심리>``.
+    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정) · 🐂🐻 시장심리 · 📖 매수타이밍``.
 
-    fear-and-greed-link: 시장 상태(breadth + VIX)와 시장 심리(F&G)를 한 줄에 그룹화.
-    데이터 fetch 없이 CNN 페이지 URL만 첨부 (Plan 권장).
+    learning-guide-link: mrkdwn 링크 2개 — CNN F&G 페이지 + GitHub 학습 자료.
+    slack 앱에서는 텍스트만 보이고 클릭 가능. raw 환경 대응은 메시지 끝
+    plain URL 푸터(_format_links_footer)가 백업.
     """
     stock_pcts = [_pct_change(q) for q in quotes if q.category == "stock"]
     up_count = sum(1 for p in stock_pcts if p > 0)
@@ -305,8 +307,10 @@ def _format_market_mood_line(quotes: list[Quote]) -> str:
         vix_text = "VIX N/A"
 
     sentiment_link = f"<{FEAR_GREED_URL}|🐂🐻 시장심리>"
+    guide_link = f"<{LEARNING_GUIDE_URL}|📖 매수타이밍>"
     return (
-        f"📊 상승 {up_count} / 하락 {down_count} / {vix_text} · {sentiment_link}"
+        f"📊 상승 {up_count} / 하락 {down_count} / {vix_text} "
+        f"· {sentiment_link} · {guide_link}"
     )
 
 
@@ -780,9 +784,33 @@ def build_v15_message(
                 lines.append(f"  📰 {compound:+.2f} \"{title}\" ({source})")
         lines.append("")
 
-    # FR-24 (v7): 푸터 제거 (범례는 상단으로 이동)
+    # learning-guide-link: raw 환경(이메일 알림/외부 통합/시뮬 등에서
+    # mrkdwn <URL|text>가 그대로 노출되는 경우) 백업 — plain URL 푸터.
+    # 슬랙 앱 사용자는 헤더 mrkdwn 링크가 자연스러움, raw 환경은 푸터 plain URL 복사.
+    footer_lines = _format_links_footer()
+    if footer_lines:
+        lines.append("")
+        lines.extend(footer_lines)
+
     msg = "\n".join(lines).rstrip()
     return _compress_if_needed(msg)
+
+
+def _format_links_footer() -> list[str]:
+    """learning-guide-link: 메시지 끝 plain URL 푸터.
+
+    헤더 mrkdwn 링크(_format_market_mood_line)와 같은 URL을 plain 형식으로
+    한 번 더 노출 → 슬랙 mrkdwn을 렌더하지 않는 환경(외부 통합/일부 이메일
+    알림/도구 시뮬 PNG)에서도 사용자가 URL을 직접 보고 클릭/복사 가능.
+
+    Returns:
+        ["🔗 링크", "🐂🐻 <CNN>", "📖 <GUIDE>"] 3 라인 또는 빈 리스트.
+    """
+    return [
+        "🔗 링크",
+        f"🐂🐻 {FEAR_GREED_URL}",
+        f"📖 {LEARNING_GUIDE_URL}",
+    ]
 
 
 def _compress_if_needed(msg: str) -> str:

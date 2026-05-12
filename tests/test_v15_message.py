@@ -387,6 +387,49 @@ def test_market_mood_line_includes_fear_greed_link():
     assert "(안정) · <" in msg
 
 
+def test_market_mood_line_includes_learning_guide_link():
+    """L1-msg-lg-1 (learning-guide-link): mood line에 GitHub 학습 자료 mrkdwn 링크 포함.
+
+    헤더 한 줄 안에 시장심리(CNN) + 매수타이밍(GitHub) 두 mrkdwn 링크 묶음.
+    """
+    from config import LEARNING_GUIDE_URL
+    quotes = [
+        _q("^VIX", "VIX", "index", last=17.19, prev=17.08),
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+    ]
+    msg = build_v15_message(quotes, compute_signals(quotes))
+    assert LEARNING_GUIDE_URL in msg
+    assert "<" + LEARNING_GUIDE_URL + "|" in msg
+    assert "📖 매수타이밍" in msg
+    # 헤더 mood line 안에 시장심리 다음에 매수타이밍 (순서 보장)
+    fg_idx = msg.find("🐂🐻 시장심리")
+    lg_idx = msg.find("📖 매수타이밍")
+    assert 0 < fg_idx < lg_idx
+
+
+def test_links_footer_contains_plain_urls():
+    """L1-msg-lg-2 (learning-guide-link): 메시지 끝 plain URL 푸터 — raw 환경 백업.
+
+    슬랙 mrkdwn을 렌더하지 않는 환경(이메일 알림/외부 통합 등)에서도
+    사용자가 URL을 직접 보고 복사할 수 있도록 plain URL을 메시지 끝에 첨부.
+    """
+    from config import FEAR_GREED_URL, LEARNING_GUIDE_URL
+    quotes = [
+        _q("^VIX", "VIX", "index", last=17.19, prev=17.08),
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+    ]
+    msg = build_v15_message(quotes, compute_signals(quotes))
+    # 푸터 헤더 + 두 plain URL이 메시지 끝에 모두 등장
+    assert "🔗 링크" in msg
+    # plain URL은 mrkdwn 꺾쇠 없이 그대로 (별도 라인)
+    assert f"🐂🐻 {FEAR_GREED_URL}" in msg
+    assert f"📖 {LEARNING_GUIDE_URL}" in msg
+    # plain URL 푸터는 헤더 mrkdwn 링크 *뒤에* 등장 (메시지 끝)
+    footer_idx = msg.find("🔗 링크")
+    header_link_idx = msg.find(f"<{FEAR_GREED_URL}|")
+    assert 0 < header_link_idx < footer_idx
+
+
 def test_vix_label_inline_with_thresholds():
     """L1-msg-19 (FR-20): VIX 종목 라인 끝에 (안정/경계/공포) 라벨 inline."""
     # 안정: <20

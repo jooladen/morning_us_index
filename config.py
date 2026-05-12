@@ -33,6 +33,14 @@ STALE_THRESHOLD_DAYS = 2
 # BTC 기반(alternative.me) 시장 부정합 0.
 FEAR_GREED_URL: str = "https://www.cnn.com/markets/fear-and-greed"
 
+# 학습 자료 GitHub blob URL — VIX/F&G 매수 타이밍 가이드 (준 작성).
+# PUBLIC repo이므로 누구나 클릭 가능. GitHub UI가 마크다운 자동 렌더.
+# 새 가이드 추가 시 같은 패턴으로 상수만 추가 + 헤더/푸터에 링크 한 줄 추가.
+LEARNING_GUIDE_URL: str = (
+    "https://github.com/jooladen/morning_us_index/blob/main/"
+    "docs/learning/VIX-FandG/beginner.md"
+)
+
 # trading-date-fix: 본 시장(미국 정규장) 캘린더와 일치하는 자산 카테고리.
 # Quote.category Literal["index", "future", "stock", "macro"] 중,
 # index(나스닥/S&P/다우/VIX) + stock(NVDA/MU 등)은 본 시장 캘린더와 동일.
