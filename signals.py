@@ -95,9 +95,9 @@ def compute_signals(quotes: list[Quote]) -> dict[str, Signal]:
     signals: dict[str, Signal] = {}
 
     for q in quotes:
-        # 🎯 갭
+        # 🎯 갭 — VIX는 변동성 지수라 갭 개념이 무의미하므로 제외
         gap_pct = 0.0
-        if q.open_today is not None and q.prev_close:
+        if q.ticker != "^VIX" and q.open_today is not None and q.prev_close:
             gap_pct = abs((q.open_today - q.prev_close) / q.prev_close * 100.0)
 
         # 🔥 거래량
