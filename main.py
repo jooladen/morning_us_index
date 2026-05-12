@@ -19,9 +19,11 @@ import requests
 import yfinance as yf
 
 from config import (
+    AI_STOCK_URL,
     DAYTRADE_CANDIDATE_MIN_SIGNALS,
     FEAR_GREED_URL,
     FOOTER_BEGINNER_GUIDE,
+    INFOSTOCK_URL,
     LEARNING_GUIDE_URL,
     HTTP_CONNECT_TIMEOUT_SEC,
     HTTP_READ_TIMEOUT_SEC,
@@ -817,12 +819,18 @@ def _format_links_footer() -> list[str]:
     알림/도구 시뮬 PNG)에서도 사용자가 URL을 직접 보고 클릭/복사 가능.
 
     Returns:
-        ["🔗 링크", "🐂🐻 <CNN>", "📖 <GUIDE>"] 3 라인 또는 빈 리스트.
+        라벨 + URL 쌍으로 구성된 라인 목록 (각 링크 = 라벨 1줄 + URL 1줄).
     """
     return [
         "🔗 링크",
-        f"🐂🐻 {FEAR_GREED_URL}",
-        f"📖 {LEARNING_GUIDE_URL}",
+        "한국주도섹터",
+        INFOSTOCK_URL,
+        "한국미국탐욕지수",
+        AI_STOCK_URL,
+        "VIX와 Fear and Greed 예제",
+        LEARNING_GUIDE_URL,
+        "CNN탐욕지수",
+        FEAR_GREED_URL,
     ]
 
 

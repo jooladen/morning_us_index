@@ -27,15 +27,11 @@ RETRY_BACKOFF_SEC: list[int] = [30, 60, 120]
 
 STALE_THRESHOLD_DAYS = 2
 
-# Fear & Greed Index 외부 링크 (CNN 공식 페이지).
-# 데이터 fetch 안 함 — URL 첨부만. 사용자 클릭 시 CNN에서 실시간 확인.
-# 우려 회피: 비공식 endpoint 차단 위험 0, 자체 합성 코드 복잡도 0,
-# BTC 기반(alternative.me) 시장 부정합 0.
+# 외부 링크 모음 — 데이터 fetch 안 함, URL 첨부만.
+# 새 링크 추가 시: 상수 추가 + import 목록 + _format_links_footer() 한 줄 추가.
+INFOSTOCK_URL: str = "https://infostock.co.kr/"
 FEAR_GREED_URL: str = "https://www.cnn.com/markets/fear-and-greed"
-
-# 학습 자료 GitHub blob URL — VIX/F&G 매수 타이밍 가이드 (준 작성).
-# PUBLIC repo이므로 누구나 클릭 가능. GitHub UI가 마크다운 자동 렌더.
-# 새 가이드 추가 시 같은 패턴으로 상수만 추가 + 헤더/푸터에 링크 한 줄 추가.
+AI_STOCK_URL: str = "https://ai-stock.co.kr/"
 LEARNING_GUIDE_URL: str = (
     "https://github.com/jooladen/morning_us_index/blob/main/"
     "docs/learning/VIX-FandG/beginner.md"

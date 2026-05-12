@@ -451,7 +451,7 @@ def test_links_footer_contains_plain_urls():
     슬랙 mrkdwn을 렌더하지 않는 환경(이메일 알림/외부 통합 등)에서도
     사용자가 URL을 직접 보고 복사할 수 있도록 plain URL을 메시지 끝에 첨부.
     """
-    from config import FEAR_GREED_URL, LEARNING_GUIDE_URL
+    from config import AI_STOCK_URL, FEAR_GREED_URL, LEARNING_GUIDE_URL
     quotes = [
         _q("^VIX", "VIX", "index", last=17.19, prev=17.08),
         _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
@@ -459,9 +459,13 @@ def test_links_footer_contains_plain_urls():
     msg = build_v15_message(quotes, compute_signals(quotes))
     # 푸터 헤더 + 두 plain URL이 메시지 끝에 모두 등장
     assert "🔗 링크" in msg
-    # plain URL은 mrkdwn 꺾쇠 없이 그대로 (별도 라인)
-    assert f"🐂🐻 {FEAR_GREED_URL}" in msg
-    assert f"📖 {LEARNING_GUIDE_URL}" in msg
+    # 라벨 + plain URL 쌍으로 노출 (mrkdwn 꺾쇠 없이 별도 라인)
+    assert "한국미국탐욕지수" in msg
+    assert AI_STOCK_URL in msg
+    assert "VIX와 Fear and Greed 예제" in msg
+    assert LEARNING_GUIDE_URL in msg
+    assert "CNN탐욕지수" in msg
+    assert FEAR_GREED_URL in msg
     # plain URL 푸터는 헤더 mrkdwn 링크 *뒤에* 등장 (메시지 끝)
     footer_idx = msg.find("🔗 링크")
     header_link_idx = msg.find(f"<{FEAR_GREED_URL}|")
