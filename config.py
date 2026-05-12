@@ -27,6 +27,12 @@ RETRY_BACKOFF_SEC: list[int] = [30, 60, 120]
 
 STALE_THRESHOLD_DAYS = 2
 
+# Fear & Greed Index 외부 링크 (CNN 공식 페이지).
+# 데이터 fetch 안 함 — URL 첨부만. 사용자 클릭 시 CNN에서 실시간 확인.
+# 우려 회피: 비공식 endpoint 차단 위험 0, 자체 합성 코드 복잡도 0,
+# BTC 기반(alternative.me) 시장 부정합 0.
+FEAR_GREED_URL: str = "https://www.cnn.com/markets/fear-and-greed"
+
 # trading-date-fix: 본 시장(미국 정규장) 캘린더와 일치하는 자산 카테고리.
 # Quote.category Literal["index", "future", "stock", "macro"] 중,
 # index(나스닥/S&P/다우/VIX) + stock(NVDA/MU 등)은 본 시장 캘린더와 동일.

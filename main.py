@@ -20,6 +20,7 @@ import yfinance as yf
 
 from config import (
     DAYTRADE_CANDIDATE_MIN_SIGNALS,
+    FEAR_GREED_URL,
     FOOTER_BEGINNER_GUIDE,
     HTTP_CONNECT_TIMEOUT_SEC,
     HTTP_READ_TIMEOUT_SEC,
@@ -282,9 +283,12 @@ def _vix_context_label(vix_quote: Quote | None) -> str:
 
 
 def _format_market_mood_line(quotes: list[Quote]) -> str:
-    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨.
+    """FR-15: 시장 동향 한 줄 — 상승/하락 카운트 + VIX 라벨 + Fear & Greed 링크.
 
-    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정)``.
+    예: ``📊 상승 8 / 하락 6 / VIX 17.19 (안정) · <URL|🐂🐻 시장심리>``.
+
+    fear-and-greed-link: 시장 상태(breadth + VIX)와 시장 심리(F&G)를 한 줄에 그룹화.
+    데이터 fetch 없이 CNN 페이지 URL만 첨부 (Plan 권장).
     """
     stock_pcts = [_pct_change(q) for q in quotes if q.category == "stock"]
     up_count = sum(1 for p in stock_pcts if p > 0)
@@ -300,7 +304,10 @@ def _format_market_mood_line(quotes: list[Quote]) -> str:
     else:
         vix_text = "VIX N/A"
 
-    return f"📊 상승 {up_count} / 하락 {down_count} / {vix_text}"
+    sentiment_link = f"<{FEAR_GREED_URL}|🐂🐻 시장심리>"
+    return (
+        f"📊 상승 {up_count} / 하락 {down_count} / {vix_text} · {sentiment_link}"
+    )
 
 
 def _format_candidate_reasons(q: Quote, sig: Signal) -> str:

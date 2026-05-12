@@ -367,6 +367,26 @@ def test_market_mood_line_appears_in_header():
     assert "(안정)" in msg
 
 
+def test_market_mood_line_includes_fear_greed_link():
+    """L1-msg-fg-1 (fear-and-greed-link): mood line 끝에 CNN F&G mrkdwn 링크 포함.
+
+    데이터 fetch 0 — URL만 첨부. 사용자 클릭 시 CNN 페이지에서 실시간 확인.
+    """
+    from config import FEAR_GREED_URL
+    quotes = [
+        _q("^VIX", "VIX", "index", last=17.19, prev=17.08),
+        _q("NVDA", "엔비디아", "stock", "반도체", last=142, prev=140),
+    ]
+    sigs = compute_signals(quotes)
+    msg = build_v15_message(quotes, sigs)
+    # mrkdwn 형식 `<URL|텍스트>` 그대로 메시지에 포함되어야 슬랙이 링크로 렌더
+    assert FEAR_GREED_URL in msg
+    assert "<" + FEAR_GREED_URL + "|" in msg
+    assert "🐂🐻 시장심리" in msg
+    # mood line 같은 줄에 붙어 있음 (개행 없이 ' · ' separator)
+    assert "(안정) · <" in msg
+
+
 def test_vix_label_inline_with_thresholds():
     """L1-msg-19 (FR-20): VIX 종목 라인 끝에 (안정/경계/공포) 라벨 inline."""
     # 안정: <20
