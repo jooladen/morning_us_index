@@ -762,8 +762,13 @@ def build_v15_message(
         lines.extend(_format_insider_section(_news_map, quotes))
 
     # 🚨 [오늘 단타 후보 (신호 2개 이상)]
+    # daytrade-candidate-stock-only: VIX(index) / 선물(future) / 환율(macro)은
+    # 거래 가능한 주식이 아니므로 단타 후보에서 제외. 사용자가 사고 팔 수 있는
+    # stock 카테고리만 후보로. VIX 변동성 등 정보는 mood line 헤더에 이미 표시.
     candidates: list[tuple[Quote, Signal]] = []
     for q in quotes:
+        if q.category != "stock":
+            continue
         sig = signals.get(q.ticker)
         if sig is not None and sig.signal_count >= DAYTRADE_CANDIDATE_MIN_SIGNALS:
             candidates.append((q, sig))

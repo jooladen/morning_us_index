@@ -116,6 +116,30 @@ def test_no_candidate_section_when_only_1_signal():
     assert "[오늘 단타 후보" not in msg
 
 
+def test_daytrade_candidate_excludes_non_stock_categories():
+    """L1-msg-dc-stock (daytrade-candidate-stock-only): VIX/future/macro는 단타 후보 제외.
+
+    버그 시나리오: VIX(category='index')가 🎯 갭 + ⚡ VIX 급등 2 신호 충족 시
+    이전에는 단타 후보로 잡혀 메시지에 'VIX ^VIX 🎯+5.9% ⚡VIX'로 표시되던
+    문제. 거래 가능한 주식(stock)이 아니므로 후보에서 명시 제외해야 함.
+    """
+    # VIX 갭 +5.9% (open vs prev_close) + VIX 일중 변동 5% 이상 → 신호 2개
+    quotes = [
+        _q("^VIX", "VIX", "index", last=18.38, prev=17.36,
+           open_today=18.38),  # 갭 +5.9%
+    ]
+    sigs = compute_signals(quotes)
+    # signals 자체는 2개 이상 (회귀 가드 — 신호 계산 그대로)
+    vix_sig = sigs.get("^VIX")
+    assert vix_sig is not None
+    # mood line(헤더)엔 VIX 정보 정상 표시
+    msg = build_v15_message(quotes, sigs)
+    assert "VIX 18.38" in msg
+    # 단타 후보 섹션엔 절대 등장 X
+    assert "[오늘 단타 후보" not in msg
+    assert "VIX ^VIX" not in msg
+
+
 # ─────────────────────────────────────────────────────────────
 # 사상최고 ★ / 신호 마크 표시
 # ─────────────────────────────────────────────────────────────
